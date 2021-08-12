@@ -230,6 +230,11 @@ func (txn *KVTxn) SetResourceGroupTag(tag []byte) {
 	txn.GetSnapshot().SetResourceGroupTag(tag)
 }
 
+// SetKeyLabel sets key label of the kv request.
+func (txn *KVTxn) SetKeyLabel(keyLabel int32) {
+	txn.GetSnapshot().SetKeyLabel(keyLabel)
+}
+
 // SetSchemaAmender sets an amender to update mutations after schema change.
 func (txn *KVTxn) SetSchemaAmender(sa SchemaAmender) {
 	txn.schemaAmender = sa

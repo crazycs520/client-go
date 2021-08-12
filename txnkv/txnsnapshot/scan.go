@@ -218,6 +218,7 @@ func (s *Scanner) getData(bo *retry.Backoffer) error {
 				NotFillCache:     s.snapshot.notFillCache,
 				IsolationLevel:   s.snapshot.isolationLevel.ToPB(),
 				ResourceGroupTag: s.snapshot.resourceGroupTag,
+				KeyLabel:         s.snapshot.keyLabel,
 			},
 			StartKey:   s.nextStartKey,
 			EndKey:     reqEndKey,
@@ -237,6 +238,7 @@ func (s *Scanner) getData(bo *retry.Backoffer) error {
 			NotFillCache:     s.snapshot.notFillCache,
 			TaskId:           s.snapshot.mu.taskID,
 			ResourceGroupTag: s.snapshot.resourceGroupTag,
+			KeyLabel:         s.snapshot.keyLabel,
 		})
 		s.snapshot.mu.RUnlock()
 		resp, err := sender.SendReq(bo, req, loc.Region, client.ReadTimeoutMedium)

@@ -132,6 +132,7 @@ type KVSnapshot struct {
 	sampleStep uint32
 	// resourceGroupTag is use to set the kv request resource group tag.
 	resourceGroupTag []byte
+	keyLabel         int32
 }
 
 // NewTiKVSnapshot creates a snapshot of an TiKV store.
@@ -350,6 +351,7 @@ func (s *KVSnapshot) batchGetSingleRegion(bo *retry.Backoffer, batch batchKeys, 
 			NotFillCache:     s.notFillCache,
 			TaskId:           s.mu.taskID,
 			ResourceGroupTag: s.resourceGroupTag,
+			KeyLabel:         s.keyLabel,
 		})
 		txnScope := s.mu.txnScope
 		isStaleness := s.mu.isStaleness
@@ -516,6 +518,7 @@ func (s *KVSnapshot) get(ctx context.Context, bo *retry.Backoffer, k []byte) ([]
 			NotFillCache:     s.notFillCache,
 			TaskId:           s.mu.taskID,
 			ResourceGroupTag: s.resourceGroupTag,
+			KeyLabel:         s.keyLabel,
 		})
 	isStaleness := s.mu.isStaleness
 	matchStoreLabels := s.mu.matchStoreLabels
@@ -705,6 +708,11 @@ func (s *KVSnapshot) SetMatchStoreLabels(labels []*metapb.StoreLabel) {
 // SetResourceGroupTag sets resource group of the kv request.
 func (s *KVSnapshot) SetResourceGroupTag(tag []byte) {
 	s.resourceGroupTag = tag
+}
+
+// SetKeyLabel sets key label of the kv request.
+func (s *KVSnapshot) SetKeyLabel(keyLabel int32) {
+	s.keyLabel = keyLabel
 }
 
 // SnapCacheHitCount gets the snapshot cache hit count. Only for test.
