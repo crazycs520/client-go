@@ -48,6 +48,7 @@ import (
 	tikverr "github.com/tikv/client-go/v2/error"
 	"github.com/tikv/client-go/v2/internal/logutil"
 	"github.com/tikv/client-go/v2/kv"
+	"github.com/tikv/client-go/v2/tikvrpc"
 	"github.com/tikv/client-go/v2/util"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -70,6 +71,8 @@ type Backoffer struct {
 	backoffSleepMS map[string]int
 	backoffTimes   map[string]int
 	parent         *Backoffer
+
+	resourceGroupTagger tikvrpc.ResourceGroupTagger
 }
 
 type txnStartCtxKeyType struct{}
@@ -107,6 +110,20 @@ func (b *Backoffer) withVars(vars *kv.Variables) *Backoffer {
 		b.maxSleep *= b.vars.BackOffWeight
 	}
 	return b
+}
+
+func (b *Backoffer) SetResourceGroupTagger(tagger tikvrpc.ResourceGroupTagger) {
+	b.resourceGroupTagger = tagger
+}
+
+func (b *Backoffer) GetResourceGroupTagger() tikvrpc.ResourceGroupTagger {
+	return b.resourceGroupTagger
+}
+
+func (b *Backoffer) ResourceGroupTagger(req *tikvrpc.Request) {
+	if b.resourceGroupTagger != nil {
+		b.resourceGroupTagger(req)
+	}
 }
 
 // Backoff sleeps a while base on the Config and records the error message.
@@ -238,16 +255,17 @@ func copyMapWithoutRecursive(srcMap map[string]int) map[string]int {
 // try not to modify the referenced content directly.
 func (b *Backoffer) Clone() *Backoffer {
 	return &Backoffer{
-		ctx:            b.ctx,
-		maxSleep:       b.maxSleep,
-		totalSleep:     b.totalSleep,
-		excludedSleep:  b.excludedSleep,
-		vars:           b.vars,
-		errors:         append([]error{}, b.errors...),
-		configs:        append([]*Config{}, b.configs...),
-		backoffSleepMS: copyMapWithoutRecursive(b.backoffSleepMS),
-		backoffTimes:   copyMapWithoutRecursive(b.backoffTimes),
-		parent:         b.parent,
+		ctx:                 b.ctx,
+		maxSleep:            b.maxSleep,
+		totalSleep:          b.totalSleep,
+		excludedSleep:       b.excludedSleep,
+		vars:                b.vars,
+		errors:              append([]error{}, b.errors...),
+		configs:             append([]*Config{}, b.configs...),
+		backoffSleepMS:      copyMapWithoutRecursive(b.backoffSleepMS),
+		backoffTimes:        copyMapWithoutRecursive(b.backoffTimes),
+		parent:              b.parent,
+		resourceGroupTagger: b.resourceGroupTagger,
 	}
 }
 
@@ -258,16 +276,17 @@ func (b *Backoffer) Clone() *Backoffer {
 func (b *Backoffer) Fork() (*Backoffer, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(b.ctx)
 	return &Backoffer{
-		ctx:            ctx,
-		maxSleep:       b.maxSleep,
-		totalSleep:     b.totalSleep,
-		excludedSleep:  b.excludedSleep,
-		errors:         append([]error{}, b.errors...),
-		configs:        append([]*Config{}, b.configs...),
-		backoffSleepMS: copyMapWithoutRecursive(b.backoffSleepMS),
-		backoffTimes:   copyMapWithoutRecursive(b.backoffTimes),
-		vars:           b.vars,
-		parent:         b,
+		ctx:                 ctx,
+		maxSleep:            b.maxSleep,
+		totalSleep:          b.totalSleep,
+		excludedSleep:       b.excludedSleep,
+		errors:              append([]error{}, b.errors...),
+		configs:             append([]*Config{}, b.configs...),
+		backoffSleepMS:      copyMapWithoutRecursive(b.backoffSleepMS),
+		backoffTimes:        copyMapWithoutRecursive(b.backoffTimes),
+		vars:                b.vars,
+		parent:              b,
+		resourceGroupTagger: b.resourceGroupTagger,
 	}, cancel
 }
 
