@@ -153,6 +153,18 @@ func (db *MemDB) Cleanup(h int) {
 	db.stages = db.stages[:h-1]
 }
 
+type MemCheckpoint = memdbCheckpoint
+
+func (db *MemDB) Checkpoint() *MemCheckpoint {
+	cp := db.vlog.checkpoint()
+	return &cp
+}
+
+func (db *MemDB) RevertToCheckpoint(cp *MemCheckpoint) {
+	db.vlog.revertToCheckpoint(db, cp)
+	db.vlog.truncate(cp)
+}
+
 // Reset resets the MemBuffer to initial states.
 func (db *MemDB) Reset() {
 	db.root = nullAddr
