@@ -160,8 +160,8 @@ func (db *MemDB) Checkpoint() *MemCheckpoint {
 	return &cp
 }
 
-func (db *MemDB) RevertToCheckpoint(cp *MemCheckpoint) {
-	db.vlog.revertToCheckpoint(db, cp)
+func (db *MemDB) RollbackToCheckpoint(cp *MemCheckpoint) {
+	db.vlog.rollbackToCheckpoint(db, cp)
 	db.vlog.truncate(cp)
 }
 

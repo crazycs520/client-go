@@ -349,6 +349,28 @@ func (l *memdbVlog) revertToCheckpoint(db *MemDB, cp *memdbCheckpoint) {
 	}
 }
 
+func (l *memdbVlog) rollbackToCheckpoint(db *MemDB, cp *memdbCheckpoint) {
+	cursor := l.checkpoint()
+	for !cp.isSamePosition(&cursor) {
+		hdrOff := cursor.offsetInBlock - memdbVlogHdrSize
+		block := l.blocks[cursor.blocks-1].buf
+		var hdr memdbVlogHdr
+		hdr.load(block[hdrOff:])
+		node := db.getNode(hdr.nodeAddr)
+
+		node.vptr = hdr.oldValue
+		db.size -= int(hdr.valueLen)
+		// oldValue.isNull() == true means this is a newly added value.
+		if hdr.oldValue.isNull() {
+			db.deleteNode(node)
+		} else {
+			db.size += len(l.getValue(hdr.oldValue))
+		}
+
+		l.moveBackCursor(&cursor, &hdr)
+	}
+}
+
 func (l *memdbVlog) inspectKVInLog(db *MemDB, head, tail *memdbCheckpoint, f func([]byte, kv.KeyFlags, []byte)) {
 	cursor := *tail
 	for !head.isSamePosition(&cursor) {
