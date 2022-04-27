@@ -69,11 +69,6 @@ func (txn TxnProbe) SetCommitter(committer CommitterProbe) {
 	txn.committer = committer.twoPhaseCommitter
 }
 
-// CollectLockedKeys returns all locked keys of a transaction.
-func (txn TxnProbe) CollectLockedKeys() [][]byte {
-	return txn.collectLockedKeys()
-}
-
 // BatchGetSingleRegion gets a batch of keys from a region.
 func (txn TxnProbe) BatchGetSingleRegion(bo *retry.Backoffer, region locate.RegionVerID, keys [][]byte, collect func([]byte, []byte)) error {
 	snapshot := txnsnapshot.SnapshotProbe{KVSnapshot: txn.GetSnapshot()}

@@ -501,11 +501,11 @@ func (txn *KVTxn) rollbackPessimisticLocks() error {
 		// it before initiating an RPC request.
 		bo.SetCtx(interceptor.WithRPCInterceptor(bo.GetCtx(), txn.interceptor))
 	}
-	keys := txn.collectLockedKeys()
+	keys := txn.CollectLockedKeys()
 	return txn.committer.pessimisticRollbackMutations(bo, &PlainMutations{keys: keys})
 }
 
-func (txn *KVTxn) collectLockedKeys() [][]byte {
+func (txn *KVTxn) CollectLockedKeys() [][]byte {
 	keys := make([][]byte, 0, txn.lockedCnt)
 	buf := txn.GetMemBuffer()
 	var err error
@@ -747,6 +747,13 @@ func (txn *KVTxn) LockKeys(ctx context.Context, lockCtx *tikv.LockCtx, keysInput
 	}
 	txn.lockedCnt += len(keys)
 	return nil
+}
+
+func (txn *KVTxn) UnlockKeys(ctx context.Context, keys ...[]byte) {
+	if len(keys) == 0 {
+		return
+	}
+	txn.asyncPessimisticRollback(ctx, keys)
 }
 
 // deduplicateKeys deduplicate the keys, it use sort instead of map to avoid memory allocation.
