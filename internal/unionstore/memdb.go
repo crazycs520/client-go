@@ -157,11 +157,13 @@ func (db *MemDB) Cleanup(h int) {
 
 type MemCheckpoint = memdbCheckpoint
 
+// Checkpoint returns a checkpoint of MemDB.
 func (db *MemDB) Checkpoint() *MemCheckpoint {
 	cp := db.vlog.checkpoint()
 	return &cp
 }
 
+// RevertToCheckpoint reverts the MemDB to the checkpoint.
 func (db *MemDB) RevertToCheckpoint(cp *MemCheckpoint) {
 	db.vlog.revertToCheckpoint(db, cp)
 	db.vlog.truncate(cp)
