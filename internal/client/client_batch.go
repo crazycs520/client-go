@@ -231,6 +231,9 @@ func (a *batchConn) fetchAllPendingRequests(
 		a.idleDetect.Reset(idleTimeout)
 		atomic.AddUint32(&a.idle, 1)
 		atomic.CompareAndSwapUint32(a.idleNotify, 0, 1)
+		if len(a.batchCommandsClients) > 0 && a.batchCommandsClients[0] != nil {
+			logutil.BgLogger().Info("tikv batch client is idle", zap.String("addr", a.batchCommandsClients[0].target))
+		}
 		// This batchConn to be recycled
 		return time.Now()
 	case <-a.closed:
@@ -609,7 +612,7 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 			if c.isStopped() {
 				return
 			}
-			logutil.BgLogger().Debug(
+			logutil.BgLogger().Info(
 				"batchRecvLoop fails when receiving, needs to reconnect",
 				zap.String("target", c.target),
 				zap.String("forwardedHost", streamClient.forwardedHost),
@@ -744,6 +747,7 @@ func (c *batchCommandsClient) initBatchClient(forwardedHost string) error {
 }
 
 func (a *batchConn) Close() {
+	logutil.BgLogger().Info("batchConn is closing")
 	// Close all batchRecvLoop.
 	for _, c := range a.batchCommandsClients {
 		// After connections are closed, `batchRecvLoop`s will check the flag.
@@ -778,7 +782,7 @@ func sendBatchRequest(
 	select {
 	case batchConn.batchCommandsCh <- entry:
 	case <-ctx.Done():
-		logutil.BgLogger().Debug("send request is cancelled",
+		logutil.BgLogger().Info("send request is cancelled",
 			zap.String("to", addr), zap.String("cause", ctx.Err().Error()))
 		return nil, errors.WithStack(ctx.Err())
 	case <-timer.C:
@@ -794,7 +798,7 @@ func sendBatchRequest(
 		return tikvrpc.FromBatchCommandsResponse(res)
 	case <-ctx.Done():
 		atomic.StoreInt32(&entry.canceled, 1)
-		logutil.BgLogger().Debug("wait response is cancelled",
+		logutil.BgLogger().Info("wait response is cancelled",
 			zap.String("to", addr), zap.String("cause", ctx.Err().Error()))
 		return nil, errors.WithStack(ctx.Err())
 	case <-timer.C:

@@ -240,6 +240,7 @@ func (a *connArray) Get() *grpc.ClientConn {
 }
 
 func (a *connArray) Close() {
+	logutil.BgLogger().Info("connArray is closing", zap.String("target", a.target))
 	if a.batchConn != nil {
 		a.batchConn.Close()
 	}
