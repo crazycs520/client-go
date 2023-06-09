@@ -37,6 +37,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/client-go/v2/internal/logutil"
+	"go.uber.org/zap"
+	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -630,4 +634,83 @@ func TestTraceExecDetails(t *testing.T) {
 			assert.Equal(t, tt.traceOut, fmtMockTracer(tracer))
 		})
 	}
+}
+
+func TestBatchClientRecoverAfterServerRestart(t *testing.T) {
+	config.UpdateGlobal(func(conf *config.Config) {
+		conf.TiKVClient.MaxBatchSize = 128
+	})()
+
+	server, port := startMockTikvService()
+	require.True(t, port > 0)
+	require.True(t, server.IsRunning())
+	defer server.Stop()
+
+	addr := fmt.Sprintf("%s:%d", "127.0.0.1", port)
+	client := NewRPCClient()
+	req := &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_Coprocessor{Coprocessor: &coprocessor.Request{}}}
+	conn, err := client.getConnArray(addr, true)
+	assert.Nil(t, err)
+	for i := 0; i < 100; i++ {
+		_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, time.Second*20)
+		require.NoError(t, err)
+	}
+
+	logutil.BgLogger().Info("1 goroutine num", zap.Int("num", runtime.NumGoroutine()))
+	// stop tikv server
+	logutil.BgLogger().Info("stop tikv server")
+	server.Stop()
+	require.False(t, server.IsRunning())
+
+	logutil.BgLogger().Info("1-2 after stop server goroutine num", zap.Int("num", runtime.NumGoroutine()))
+
+	for i := 0; i < 1000; i++ {
+		_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, time.Second*20)
+		require.Error(t, err)
+		time.Sleep(time.Millisecond * time.Duration(rand.Intn(100)))
+		if i%100 == 0 {
+			grpcConn := conn.Get()
+			require.NotNil(t, grpcConn)
+			logutil.BgLogger().Info("conn state", zap.String("state", grpcConn.GetState().String()), zap.Int("i", i), zap.Int("goroutine-num", runtime.NumGoroutine()))
+		}
+	}
+
+	logutil.BgLogger().Info("2 before restart goroutine num", zap.Int("num", runtime.NumGoroutine()))
+	// restart tikv server
+	logutil.BgLogger().Info("start tikv server")
+	server.Start(addr)
+	require.True(t, server.IsRunning())
+
+	start := time.Now()
+	for {
+		grpcConn := conn.Get()
+		require.NotNil(t, grpcConn)
+		var cli *batchCommandsClient
+		for i := range conn.batchConn.batchCommandsClients {
+			if conn.batchConn.batchCommandsClients[i].tryLockForSend() {
+				cli = conn.batchConn.batchCommandsClients[i]
+				break
+			}
+		}
+		// Wait for the connection to be ready,
+		// It shouldn't take too long for batch_client to get a ready connection.
+		if cli != nil {
+			cli.unlockForSend()
+			break
+		}
+		if time.Since(start) > time.Second*3 {
+			t.Fatal("wait too long")
+		}
+		logutil.BgLogger().Info("xx", zap.Int("goroutine-num", runtime.NumGoroutine()))
+		time.Sleep(time.Millisecond * 10)
+	}
+
+	// send request again, it should work again.
+	for i := 0; i < 100; i++ {
+		_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, time.Second*20)
+		require.NoError(t, err)
+	}
+	logutil.BgLogger().Info("3 final goroutine num", zap.Int("num", runtime.NumGoroutine()))
+	err = client.Close()
+	require.NoError(t, err)
 }
