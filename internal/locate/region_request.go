@@ -557,9 +557,6 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 			state.lastIdx = idx
 			selector.targetIdx = idx
 			break
-		} else if selector.replicas[idx].isEpochStale() {
-			// reload region later.
-			selector.invalidateRegion()
 		}
 	}
 	// If there is no candidate, fallback to the leader.
@@ -631,13 +628,15 @@ func newReplicaSelector(regionCache *RegionCache, regionID RegionVerID, req *tik
 	regionStore := cachedRegion.getStore()
 	replicas := make([]*replica, 0, regionStore.accessStoreNum(tiKVOnly))
 	for _, storeIdx := range regionStore.accessIndex[tiKVOnly] {
-		replicas = append(replicas, &replica{
+		replica := &replica{
 			store:    regionStore.stores[storeIdx],
 			peer:     cachedRegion.meta.Peers[storeIdx],
 			epoch:    regionStore.storeEpochs[storeIdx],
 			attempts: 0,
-		})
-		if replicas[len(replicas)-1].isEpochStale() {
+		}
+		replicas = append(replicas, replica)
+		if replica.isEpochStale() {
+			cachedRegion.invalidate(Other)
 			logutil.BgLogger().Info("new replica but meet region epoch is stale",
 				zap.Uint64("region-id", regionID.GetID()),
 				zap.Uint64("store-id", regionStore.stores[storeIdx].storeID),
