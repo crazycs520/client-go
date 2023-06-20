@@ -557,7 +557,8 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 			state.lastIdx = idx
 			selector.targetIdx = idx
 			break
-		} else {
+		} else if selector.replicas[idx].isEpochStale() {
+			// reload region later.
 			selector.invalidateRegion()
 		}
 	}
