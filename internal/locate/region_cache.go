@@ -472,7 +472,7 @@ func (c *RegionCache) asyncCheckAndResolveLoop(interval time.Duration) {
 
 // checkAndResolve checks and resolve addr of failed stores.
 // this method isn't thread-safe and only be used by one goroutine.
-func (c *RegionCache) checkAndResolve(needCheckStores []*Store, needCheck func(*Store) bool) {
+func (c *RegionCache) checkAndResolve(needCheckStores []*Store, needCheckFn func(*Store) bool) {
 	defer func() {
 		r := recover()
 		if r != nil {
@@ -484,16 +484,17 @@ func (c *RegionCache) checkAndResolve(needCheckStores []*Store, needCheck func(*
 
 	c.storeMu.RLock()
 	for _, store := range c.storeMu.stores {
-		if needCheck(store) {
+		if needCheckFn(store) {
 			needCheckStores = append(needCheckStores, store)
 		}
 	}
 	c.storeMu.RUnlock()
 
 	for _, store := range needCheckStores {
+		oldState := store.getResolveState()
 		resolved, err := store.reResolve(c)
 		tikverr.Log(err)
-		if resolved {
+		if oldState == needCheck && resolved {
 			c.updateStoreAllRegionsStoreEpoch(store)
 		}
 	}
