@@ -491,8 +491,29 @@ func (c *RegionCache) checkAndResolve(needCheckStores []*Store, needCheck func(*
 	c.storeMu.RUnlock()
 
 	for _, store := range needCheckStores {
-		_, err := store.reResolve(c)
+		resolved, err := store.reResolve(c)
 		tikverr.Log(err)
+		if resolved {
+			c.updateStoreAllRegionsStoreEpoch(store)
+		}
+	}
+}
+
+func (c *RegionCache) updateStoreAllRegionsStoreEpoch(store *Store) {
+	start := time.Now()
+	c.mu.RLock()
+	defer func() {
+		c.mu.RUnlock()
+		logutil.BgLogger().Info("update store all regions's store epoch", zap.Duration("cost", time.Since(start)))
+	}()
+	for _, region := range c.mu.regions {
+		regionStore := region.getStore()
+		for i, rs := range regionStore.stores {
+			if rs == store && regionStore.storeEpochs[i] != rs.epoch {
+				regionStore.storeEpochs[i] = rs.epoch
+				break
+			}
+		}
 	}
 }
 
