@@ -557,6 +557,8 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 			state.lastIdx = idx
 			selector.targetIdx = idx
 			break
+		} else {
+			selector.invalidateRegion()
 		}
 	}
 	// If there is no candidate, fallback to the leader.
@@ -637,8 +639,8 @@ func newReplicaSelector(regionCache *RegionCache, regionID RegionVerID, req *tik
 		if replicas[len(replicas)-1].isEpochStale() {
 			logutil.BgLogger().Info("new replica but meet region epoch is stale",
 				zap.Uint64("region-id", regionID.GetID()),
-				zap.Uint64("store-addr", regionStore.stores[storeIdx].storeID),
-				zap.Uint64("store-addr", regionStore.stores[storeIdx].state),
+				zap.Uint64("store-id", regionStore.stores[storeIdx].storeID),
+				zap.Uint64("store-state", regionStore.stores[storeIdx].state),
 				zap.Uint32("store-epoch", regionStore.stores[storeIdx].epoch),
 				zap.Uint32("region-store-epoch", regionStore.storeEpochs[storeIdx]),
 				zap.String("store-addr", regionStore.stores[storeIdx].addr),
