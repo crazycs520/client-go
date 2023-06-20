@@ -636,7 +636,7 @@ func newReplicaSelector(regionCache *RegionCache, regionID RegionVerID, req *tik
 		}
 		replicas = append(replicas, replica)
 		if replica.isEpochStale() {
-			cachedRegion.invalidate(Other)
+			//cachedRegion.invalidate(Other)
 			logutil.BgLogger().Info("new replica but meet region epoch is stale",
 				zap.Uint64("region-id", regionID.GetID()),
 				zap.Uint64("store-id", regionStore.stores[storeIdx].storeID),
