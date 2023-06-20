@@ -501,16 +501,23 @@ func (c *RegionCache) checkAndResolve(needCheckStores []*Store, needCheck func(*
 
 func (c *RegionCache) updateStoreAllRegionsStoreEpoch(store *Store) {
 	start := time.Now()
+	updatedCnt := 0
 	c.mu.RLock()
 	defer func() {
 		c.mu.RUnlock()
-		logutil.BgLogger().Info("update store all regions's store epoch", zap.Duration("cost", time.Since(start)))
+		logutil.BgLogger().Info("update store all regions's store epoch",
+			zap.Uint64("store-id", store.storeID),
+			zap.Uint32("store-id", store.epoch),
+			zap.String("store-addr", store.addr),
+			zap.Int("update-cnt", updatedCnt),
+			zap.Duration("cost", time.Since(start)))
 	}()
 	for _, region := range c.mu.regions {
 		regionStore := region.getStore()
 		for i, rs := range regionStore.stores {
 			if rs == store && regionStore.storeEpochs[i] != rs.epoch {
 				regionStore.storeEpochs[i] = rs.epoch
+				updatedCnt++
 				break
 			}
 		}
