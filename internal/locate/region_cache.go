@@ -379,6 +379,7 @@ func (r *Region) invalidate(reason InvalidReason) {
 	metrics.RegionCacheCounterWithInvalidateRegionFromCacheOK.Inc()
 	atomic.StoreInt32((*int32)(&r.invalidReason), int32(reason))
 	atomic.StoreInt64(&r.lastAccess, invalidatedLastAccessTime)
+	logutil.BgLogger().Info("invalidate region", zap.Uint64("region-id", r.GetID()), zap.Int32("reason", int32(reason)), zap.Stack("stack"))
 }
 
 // scheduleReload schedules reload region request in next LocateKey.
