@@ -323,7 +323,7 @@ func (s *replicaSelector) String() string {
 		}
 		for _, replica := range s.replicas {
 			replicaStatus = append(replicaStatus, fmt.Sprintf("peer: %v, store: %v, isEpochStale: %v, "+
-				"attempts: %v, replica-epoch: %v, store-epoch: %v, store-state: %v, store-liveness-state: %v",
+				"attempts: %v, replica-epoch: %v, store-epoch: %v, store-state: %v, store-liveness-state: %v, deadline-err: %v",
 				replica.peer.GetId(),
 				replica.store.storeID,
 				replica.isEpochStale(),
@@ -332,6 +332,7 @@ func (s *replicaSelector) String() string {
 				atomic.LoadUint32(&replica.store.epoch),
 				replica.store.getResolveState(),
 				replica.store.getLivenessState(),
+				replica.deadlineErrUsingConfTimeout,
 			))
 		}
 	}
@@ -1778,6 +1779,7 @@ func (s *RegionRequestSender) onSendFail(bo *retry.Backoffer, ctx *RPCContext, r
 		return errors.WithStack(tikverr.ErrTiDBShuttingDown)
 	} else if errors.Cause(err) == context.DeadlineExceeded && req.MaxExecutionDurationMs < uint64(client.ReadTimeoutShort.Milliseconds()) {
 		if s.replicaSelector != nil {
+			logutil.Logger(bo.GetCtx()).Info("onSendFail, request deadline execeeded", zap.Error(err))
 			s.replicaSelector.onDeadlineExceeded()
 			return nil
 		}
@@ -1798,6 +1800,7 @@ func (s *RegionRequestSender) onSendFail(bo *retry.Backoffer, ctx *RPCContext, r
 		s.regionCache.InvalidateTiFlashComputeStoresIfGRPCError(err)
 	} else if ctx.Meta != nil {
 		if s.replicaSelector != nil {
+			logutil.Logger(bo.GetCtx()).Info("onSendFail, onSendFailure", zap.Error(err))
 			s.replicaSelector.onSendFailure(bo, err)
 		} else {
 			s.regionCache.OnSendFail(bo, ctx, s.NeedReloadRegion(ctx), err)
@@ -1826,6 +1829,7 @@ func (s *RegionRequestSender) onSendFail(bo *retry.Backoffer, ctx *RPCContext, r
 			errors.Errorf("send tiflash request error: %v, ctx: %v, try next peer later", err, ctx),
 		)
 	} else {
+		logutil.Logger(bo.GetCtx()).Info("onSendFail, do backoff", zap.Error(err))
 		err = bo.Backoff(
 			retry.BoTiKVRPC,
 			errors.Errorf("send tikv request error: %v, ctx: %v, try next peer later", err, ctx),
