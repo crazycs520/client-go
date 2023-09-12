@@ -312,6 +312,7 @@ func (s *replicaSelector) String() string {
 	var replicaStatus []string
 	cacheRegionIsValid := "unknown"
 	selectorStateStr := "nil"
+	stateInfo := ""
 	if s != nil {
 		selectorStateStr = selectorStateToString(s.state)
 		if s.region != nil {
@@ -335,9 +336,15 @@ func (s *replicaSelector) String() string {
 				replica.deadlineErrUsingConfTimeout,
 			))
 		}
+		if s.state != nil {
+			switch x := s.state.(type) {
+			case *accessFollower:
+				stateInfo = fmt.Sprintf("try-leader: %v,leaderIdx: %v", x.tryLeader, x.leaderIdx)
+			}
+		}
 	}
 
-	return fmt.Sprintf("replicaSelector{selectorStateStr: %v, cacheRegionIsValid: %v, replicaStatus: %v}", selectorStateStr, cacheRegionIsValid, replicaStatus)
+	return fmt.Sprintf("replicaSelector{selectorStateStr: %v, cacheRegionIsValid: %v, replicaStatus: %v, stateInfo: %v}", selectorStateStr, cacheRegionIsValid, replicaStatus, stateInfo)
 }
 
 // selectorState is the interface of states of the replicaSelector.
@@ -756,6 +763,13 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 				return nil, stateChanged{}
 			}
 			metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("exhausted").Inc()
+			logutil.Logger(bo.GetCtx()).Warn("accessFollower invalid region",
+				zap.Bool("opt.leaderonly", state.option.leaderOnly),
+				zap.Bool("state.stale-read", state.isStaleRead),
+				zap.Bool("leader-deadline-err", leader.deadlineErrUsingConfTimeout),
+				zap.Bool("leaderInvalid", leaderInvalid),
+				zap.Any("leader-idx", state.leaderIdx),
+			)
 			selector.invalidateRegion()
 			return nil, nil
 		}
@@ -1779,7 +1793,6 @@ func (s *RegionRequestSender) onSendFail(bo *retry.Backoffer, ctx *RPCContext, r
 		return errors.WithStack(tikverr.ErrTiDBShuttingDown)
 	} else if errors.Cause(err) == context.DeadlineExceeded && req.MaxExecutionDurationMs < uint64(client.ReadTimeoutShort.Milliseconds()) {
 		if s.replicaSelector != nil {
-			logutil.Logger(bo.GetCtx()).Info("onSendFail, request deadline execeeded", zap.Error(err))
 			s.replicaSelector.onDeadlineExceeded()
 			return nil
 		}
