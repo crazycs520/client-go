@@ -49,6 +49,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tikv/client-go/v2/kv"
 	"github.com/tikv/client-go/v2/oracle"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // CmdType represents the concrete request type in Request or response type in Response.
@@ -1132,6 +1134,9 @@ func CallRPC(ctx context.Context, client tikvpb.TikvClient, req *Request) (*Resp
 		return nil, errors.Errorf("invalid request type: %v", req.Type)
 	}
 	if err != nil {
+		if status.Code(err) == codes.DeadlineExceeded {
+			err = errors.WithMessage(context.DeadlineExceeded, "rpc deadline exceeded")
+		}
 		return nil, errors.WithStack(err)
 	}
 	return resp, nil

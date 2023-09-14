@@ -37,6 +37,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"google.golang.org/grpc/status"
 	"math/rand"
 	"runtime"
 	"strconv"
@@ -721,4 +722,47 @@ func TestBatchClientRecoverAfterServerRestart(t *testing.T) {
 		_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, time.Second*20)
 		require.NoError(t, err)
 	}
+}
+
+func TestCs(t *testing.T) {
+	defer func() {
+		fmt.Printf("test finish\n")
+	}()
+	ch := make(chan int, 1)
+	fmt.Printf("start--, ch.len: %v\n", len(ch))
+	ch <- 1
+	fmt.Printf("send 1, ch.len: %v\n", len(ch))
+	select {
+	case ch <- 2:
+		fmt.Printf("send 2, ch.len: %v\n", len(ch))
+	default:
+		fmt.Printf("send faild, ch.len: %v\n", len(ch))
+	}
+}
+
+func TestSendTimeout(t *testing.T) {
+	defer config.UpdateGlobal(func(conf *config.Config) {
+		conf.TiKVClient.MaxBatchSize = 0
+	})()
+
+	server, port := startMockTikvService()
+	require.True(t, port > 0)
+	server.setMetaChecker(func(ctx context.Context) error {
+		time.Sleep(time.Second * 2)
+		return nil
+	})
+
+	rpcClient := NewRPCClient()
+	defer rpcClient.Close()
+	addr := fmt.Sprintf("%s:%d", "127.0.0.1", port)
+
+	req := tikvrpc.NewRequest(tikvrpc.CmdGet, &kvrpcpb.GetRequest{Key: []byte("a"), Version: 1})
+	_, err := rpcClient.SendRequest(context.Background(), addr, req, time.Millisecond*100)
+	require.NotNil(t, err)
+
+	fmt.Printf("%T ---\n\n", errors.Cause(err))
+	fmt.Printf("err: %#v\n\n", err)
+	fmt.Printf("\n\n%v\n%v\n%#v\n%v ----\n\n", err.Error(), errors.Cause(err), err, status.Code(errors.Cause(err)))
+	assert.True(t, context.DeadlineExceeded == errors.Cause(err))
+	server.Stop()
 }

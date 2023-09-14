@@ -56,6 +56,13 @@ func (s *server) KvPrewrite(ctx context.Context, req *kvrpcpb.PrewriteRequest) (
 	return &kvrpcpb.PrewriteResponse{}, nil
 }
 
+func (s *server) KvGet(ctx context.Context, req *kvrpcpb.GetRequest) (*kvrpcpb.GetResponse, error) {
+	if err := s.checkMetadata(ctx); err != nil {
+		return nil, err
+	}
+	return &kvrpcpb.GetResponse{}, nil
+}
+
 func (s *server) CoprocessorStream(req *coprocessor.Request, ss tikvpb.Tikv_CoprocessorStreamServer) error {
 	if err := s.checkMetadata(ss.Context()); err != nil {
 		return err
