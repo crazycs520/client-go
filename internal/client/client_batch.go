@@ -511,6 +511,7 @@ func (c *batchCommandsClient) isStopped() bool {
 }
 
 func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchCommandsRequest) {
+	start := time.Now()
 	err := c.initBatchClient(forwardedHost)
 	if err != nil {
 		logutil.BgLogger().Warn(
@@ -522,7 +523,9 @@ func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchComman
 		c.failPendingRequests(err)
 		return
 	}
+	metrics.TiKVBatchWaitDuration.WithLabelValues("init-batch-client", c.target).Observe(float64(time.Since(start)))
 
+	startSend := time.Now()
 	client := c.client
 	if forwardedHost != "" {
 		client = c.forwardedClients[forwardedHost]
@@ -537,6 +540,7 @@ func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchComman
 		)
 		c.failPendingRequests(err)
 	}
+	metrics.TiKVBatchWaitDuration.WithLabelValues("batch-client-send", c.target).Observe(float64(time.Since(startSend)))
 }
 
 // `failPendingRequests` must be called in locked contexts in order to avoid double closing channels.
