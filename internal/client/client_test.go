@@ -729,7 +729,7 @@ func TestCs(t *testing.T) {
 		fmt.Printf("test finish\n")
 	}()
 	ch := make(chan int, 1)
-	fmt.Printf("start--, ch.len: %v\n", len(ch))
+	fmt.Printf("start--, ch.len: %v, cap: %v\n", len(ch), cap(ch))
 	ch <- 1
 	fmt.Printf("send 1, ch.len: %v\n", len(ch))
 	select {

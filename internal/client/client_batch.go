@@ -201,8 +201,15 @@ type batchConn struct {
 	pendingRequests prometheus.Observer
 	batchSize       prometheus.Observer
 
-	index uint32
+	index         uint32
+	state         atomic.Int32
+	startSendTime time.Time
 }
+
+var (
+	batchConnIdle    = int32(0)
+	batchConnSending = int32(1)
+)
 
 func newBatchConn(connCount, maxBatchSize uint, idleNotify *uint32) *batchConn {
 	return &batchConn{
@@ -218,6 +225,16 @@ func newBatchConn(connCount, maxBatchSize uint, idleNotify *uint32) *batchConn {
 
 func (a *batchConn) isIdle() bool {
 	return atomic.LoadUint32(&a.idle) != 0
+}
+
+func (a *batchConn) isBusy() bool {
+	if len(a.batchCommandsCh) == cap(a.batchCommandsCh) {
+		return true
+	}
+	if a.state.Load() == batchConnSending && time.Since(a.startSendTime) > time.Second {
+		return true
+	}
+	return false
 }
 
 // fetchAllPendingRequests fetches all pending requests from the channel.
@@ -315,6 +332,7 @@ func (a *batchConn) batchSendLoop(cfg config.TiKVClient) {
 
 	bestBatchWaitSize := cfg.BatchWaitSize
 	for {
+		a.state.Store(batchConnIdle)
 		a.reqBuilder.reset()
 
 		start := a.fetchAllPendingRequests(int(cfg.MaxBatchSize))
@@ -346,6 +364,8 @@ func (a *batchConn) batchSendLoop(cfg config.TiKVClient) {
 			bestBatchWaitSize++
 		}
 
+		a.state.Store(batchConnSending)
+		a.startSendTime = start
 		a.getClientAndSend()
 		metrics.TiKVBatchSendLatency.Observe(float64(time.Since(start)))
 	}
