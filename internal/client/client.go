@@ -642,10 +642,15 @@ func (c *RPCClient) sendRequest(ctx context.Context, addr string, req *tikvrpc.R
 
 	client := tikvpb.NewTikvClient(clientConn)
 
+	metrics.TiKVSendReqDurationHistogram.WithLabelValues("prepare-client", addr).Observe(time.Since(start).Seconds())
 	// Set metadata for request forwarding. Needn't forward DebugReq.
 	if req.ForwardedHost != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, forwardMetadataKey, req.ForwardedHost)
 	}
+	startTime := time.Now()
+	defer func() {
+		metrics.TiKVSendReqDurationHistogram.WithLabelValues(req.Type.String(), addr).Observe(time.Since(startTime).Seconds())
+	}()
 	switch req.Type {
 	case tikvrpc.CmdBatchCop:
 		return c.getBatchCopStreamResponse(ctx, client, req, timeout, connArray)
