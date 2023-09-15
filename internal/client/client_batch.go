@@ -406,7 +406,13 @@ func (a *batchConn) getClientAndSend() {
 		if trace.IsEnabled() {
 			trace.Log(e.ctx, "rpc", "send")
 		}
-		batchCmdWaitToSendDuration.Observe(float64(now.Sub(e.start)))
+		wait := now.Sub(e.start)
+		batchCmdWaitToSendDuration.Observe(float64(wait))
+		if wait > time.Second*5 {
+			logutil.BgLogger().Warn("cmd wait to send too slow",
+				zap.String("target", target),
+				zap.Duration("wait", wait))
+		}
 	})
 	if req != nil {
 		cli.send("", req)
@@ -534,9 +540,9 @@ func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchComman
 	start := time.Now()
 	defer func() {
 		if forwardedHost == "" {
-			metrics.TiKVBatchConnSendDuration.WithLabelValues(c.target).Observe(time.Since(start).Seconds())
+			metrics.TiKVBatchConnSendDuration.WithLabelValues("total", c.target).Observe(time.Since(start).Seconds())
 		} else {
-			metrics.TiKVBatchConnSendDuration.WithLabelValues(forwardedHost).Observe(time.Since(start).Seconds())
+			metrics.TiKVBatchConnSendDuration.WithLabelValues("total", forwardedHost).Observe(time.Since(start).Seconds())
 		}
 	}()
 	err := c.initBatchClient(forwardedHost)
@@ -555,7 +561,20 @@ func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchComman
 	if forwardedHost != "" {
 		client = c.forwardedClients[forwardedHost]
 	}
-	if err := client.Send(req); err != nil {
+	startSend := time.Now()
+	metrics.TiKVBatchConnSendDuration.WithLabelValues("init-client", c.target).Observe(startSend.Sub(start).Seconds())
+	err = client.Send(req)
+	metrics.TiKVBatchConnSendDuration.WithLabelValues("send", c.target).Observe(time.Since(startSend).Seconds())
+	if time.Since(startSend) > time.Second*5 {
+		logutil.BgLogger().Info(
+			"sending batch commands too slow",
+			zap.String("target", c.target),
+			zap.String("forwardedHost", forwardedHost),
+			zap.Int("req-len", len(req.RequestIds)),
+			zap.Duration("cost", time.Since(startSend)),
+		)
+	}
+	if err != nil {
 		logutil.BgLogger().Info(
 			"sending batch commands meets error",
 			zap.String("target", c.target),

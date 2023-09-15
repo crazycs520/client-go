@@ -342,7 +342,7 @@ func initMetrics(namespace, subsystem string, constLabels prometheus.Labels) {
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 22), // 0.5ms ~ 1048s
 			Help:        "batch conn send duration",
 			ConstLabels: constLabels,
-		}, []string{LblStore})
+		}, []string{LblType, LblStore})
 
 	TiKVBatchCmdDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
