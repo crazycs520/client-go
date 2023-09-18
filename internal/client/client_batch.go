@@ -702,7 +702,15 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 				trace.Log(entry.ctx, "rpc", "received")
 			}
 			logutil.Eventf(entry.ctx, "receive %T response with other %d batched requests from %s", responses[i].GetCmd(), len(responses), c.target)
-			batchCmdGotRespDuration.Observe(float64(now.Sub(entry.start)))
+			cmdCost := now.Sub(entry.start)
+			batchCmdGotRespDuration.Observe(float64(cmdCost))
+			if cmdCost > time.Second*10 {
+				logutil.BgLogger().Info(
+					"batch commands got resp too slow",
+					zap.String("target", c.target),
+					zap.Duration("cost", cmdCost),
+				)
+			}
 			if atomic.LoadInt32(&entry.canceled) == 0 {
 				// Put the response only if the request is not canceled.
 				entry.res <- responses[i]
