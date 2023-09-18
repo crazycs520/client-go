@@ -704,7 +704,7 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 			logutil.Eventf(entry.ctx, "receive %T response with other %d batched requests from %s", responses[i].GetCmd(), len(responses), c.target)
 			cmdCost := now.Sub(entry.start)
 			batchCmdGotRespDuration.Observe(float64(cmdCost))
-			if cmdCost > time.Second*10 {
+			if cmdCost > time.Second*60 {
 				logutil.BgLogger().Info(
 					"batch commands got resp too slow",
 					zap.String("target", c.target),
