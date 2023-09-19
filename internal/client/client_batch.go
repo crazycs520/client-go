@@ -69,6 +69,7 @@ type batchCommandsEntry struct {
 	// canceled indicated the request is canceled or not.
 	canceled int32
 	err      error
+	start    time.Time
 }
 
 func (b *batchCommandsEntry) isCanceled() bool {
@@ -377,10 +378,20 @@ func (a *batchConn) getClientAndSend() {
 	}
 	defer cli.unlockForSend()
 
+	now := time.Now()
+	batchCmdWaitToSendDuration := metrics.TiKVBatchCmdDuration.WithLabelValues("wait-to-send", target)
 	req, forwardingReqs := a.reqBuilder.build(func(id uint64, e *batchCommandsEntry) {
 		cli.batched.Store(id, e)
 		if trace.IsEnabled() {
 			trace.Log(e.ctx, "rpc", "send")
+		}
+		batchCmdWaitToSendDuration.Observe(float64(now.Sub(e.start)))
+		if now.Sub(e.start) > time.Second*10 {
+			logutil.BgLogger().Info(
+				"batch commands wait to send too slow",
+				zap.String("target", target),
+				zap.Duration("cost", time.Since(e.start)),
+			)
 		}
 	})
 	if req != nil {
@@ -506,6 +517,14 @@ func (c *batchCommandsClient) isStopped() bool {
 }
 
 func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchCommandsRequest) {
+	start := time.Now()
+	defer func() {
+		if forwardedHost == "" {
+			metrics.TiKVBatchConnSendDuration.WithLabelValues("total", c.target).Observe(time.Since(start).Seconds())
+		} else {
+			metrics.TiKVBatchConnSendDuration.WithLabelValues("total", forwardedHost).Observe(time.Since(start).Seconds())
+		}
+	}()
 	err := c.initBatchClient(forwardedHost)
 	if err != nil {
 		logutil.BgLogger().Warn(
@@ -517,12 +536,24 @@ func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchComman
 		c.failPendingRequests(err)
 		return
 	}
-
+	metrics.TiKVBatchConnSendDuration.WithLabelValues("init-client", c.target).Observe(time.Since(start).Seconds())
 	client := c.client
 	if forwardedHost != "" {
 		client = c.forwardedClients[forwardedHost]
 	}
-	if err := client.Send(req); err != nil {
+	startSend := time.Now()
+	err = client.Send(req)
+	metrics.TiKVBatchConnSendDuration.WithLabelValues("send", c.target).Observe(time.Since(startSend).Seconds())
+	if time.Since(startSend) > time.Second*10 {
+		logutil.BgLogger().Info(
+			"sending batch commands too slow",
+			zap.String("target", c.target),
+			zap.String("forwardedHost", forwardedHost),
+			zap.Int("req-count", len(req.RequestIds)),
+			zap.Duration("cost", time.Since(startSend)),
+		)
+	}
+	if err != nil {
 		logutil.BgLogger().Info(
 			"sending batch commands meets error",
 			zap.String("target", c.target),
@@ -612,6 +643,7 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 	}()
 
 	epoch := atomic.LoadUint64(&c.epoch)
+	batchCmdGotRespDuration := metrics.TiKVBatchCmdDuration.WithLabelValues("got-resp", c.target)
 	for {
 		resp, err := streamClient.recv()
 		if err != nil {
@@ -648,6 +680,14 @@ func (c *batchCommandsClient) batchRecvLoop(cfg config.TiKVClient, tikvTransport
 				trace.Log(entry.ctx, "rpc", "received")
 			}
 			logutil.Eventf(entry.ctx, "receive %T response with other %d batched requests from %s", responses[i].GetCmd(), len(responses), c.target)
+			batchCmdGotRespDuration.Observe(float64(time.Since(entry.start)))
+			if time.Since(entry.start) > time.Second*30 {
+				logutil.BgLogger().Info(
+					"batch commands got resp too slow",
+					zap.String("target", c.target),
+					zap.Duration("cost", time.Since(entry.start)),
+				)
+			}
 			if atomic.LoadInt32(&entry.canceled) == 0 {
 				// Put the response only if the request is not canceled.
 				entry.res <- responses[i]
@@ -772,6 +812,7 @@ func sendBatchRequest(
 	req *tikvpb.BatchCommandsRequest_Request,
 	timeout time.Duration,
 ) (*tikvrpc.Response, error) {
+	start := time.Now()
 	entry := &batchCommandsEntry{
 		ctx:           ctx,
 		req:           req,
@@ -779,11 +820,11 @@ func sendBatchRequest(
 		forwardedHost: forwardedHost,
 		canceled:      0,
 		err:           nil,
+		start:         start,
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	start := time.Now()
 	select {
 	case batchConn.batchCommandsCh <- entry:
 	case <-ctx.Done():
@@ -793,7 +834,8 @@ func sendBatchRequest(
 	case <-timer.C:
 		return nil, errors.WithMessage(context.DeadlineExceeded, "wait sendLoop")
 	}
-	metrics.TiKVBatchWaitDuration.Observe(float64(time.Since(start)))
+	waitDuration := time.Since(start)
+	metrics.TiKVBatchCmdDuration.WithLabelValues("send-to-chan", addr).Observe(float64(waitDuration))
 
 	select {
 	case res, ok := <-entry.res:
