@@ -47,7 +47,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
 	"github.com/pingcap/kvproto/pkg/debugpb"
@@ -150,14 +150,6 @@ func (a *connArray) Init(addr string, security config.Security, idleNotify *uint
 	}
 
 	cfg := config.GetGlobalConfig()
-	var (
-		unaryInterceptor  grpc.UnaryClientInterceptor
-		streamInterceptor grpc.StreamClientInterceptor
-	)
-	if cfg.OpenTracingEnable {
-		unaryInterceptor = grpc_opentracing.UnaryClientInterceptor()
-		streamInterceptor = grpc_opentracing.StreamClientInterceptor()
-	}
 
 	allowBatch := (cfg.TiKVClient.MaxBatchSize > 0) && enableBatch
 	if allowBatch {
@@ -175,12 +167,13 @@ func (a *connArray) Init(addr string, security config.Security, idleNotify *uint
 			callOptions = append(callOptions, grpc.UseCompressor(gzip.Name))
 		}
 
+		grpc_prometheus.EnableClientHandlingTimeHistogram()
 		opts = append([]grpc.DialOption{
 			opt,
 			grpc.WithInitialWindowSize(GrpcInitialWindowSize),
 			grpc.WithInitialConnWindowSize(GrpcInitialConnWindowSize),
-			grpc.WithUnaryInterceptor(unaryInterceptor),
-			grpc.WithStreamInterceptor(streamInterceptor),
+			grpc.WithUnaryInterceptor(grpc_prometheus.UnaryClientInterceptor),
+			grpc.WithStreamInterceptor(grpc_prometheus.StreamClientInterceptor),
 			grpc.WithDefaultCallOptions(callOptions...),
 			grpc.WithConnectParams(grpc.ConnectParams{
 				Backoff: backoff.Config{
