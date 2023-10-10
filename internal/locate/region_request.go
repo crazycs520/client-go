@@ -1494,6 +1494,9 @@ func (s *RegionRequestSender) SendReqCtx(
 			return nil, nil, retryTimes, err
 		}
 		if regionErr != nil {
+			logutil.Logger(bo.GetCtx()).Info("send request got region error",
+				zap.String("err-message", regionErr.Message),
+				zap.String("err-string", regionErr.String()))
 			regionErrLogging := regionErrorToLogging(rpcCtx.Peer.GetId(), regionErr)
 			totalErrors[regionErrLogging]++
 			retry, err = s.onRegionError(bo, rpcCtx, req, regionErr)

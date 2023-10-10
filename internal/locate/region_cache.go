@@ -968,7 +968,14 @@ func (l *KeyLocation) GetBucketVersion() uint64 {
 // as there's no bucket containing this key. LocateBucket will return Bucket{KeyLocation.StartKey, first Bucket key}
 // as it's reasonable to assume that Bucket{KeyLocation.StartKey, first Bucket key} is a bucket belonging to the region.
 // Key in [last Bucket key, KeyLocation.EndKey) is handled similarly.
-func (l *KeyLocation) LocateBucket(key []byte) *Bucket {
+func (l *KeyLocation) LocateBucket(bo *retry.Backoffer, key []byte) *Bucket {
+	start := time.Now()
+	defer func() {
+		cost := time.Since(start)
+		if cost > time.Millisecond*50 {
+			logutil.Logger(bo.GetCtx()).Info("LocateKey takes too much time", zap.Duration("cost", cost))
+		}
+	}()
 	bucket := l.locateBucket(key)
 	// Return the bucket when locateBucket can locate the key
 	if bucket != nil {
@@ -1037,6 +1044,13 @@ func (b *Bucket) Contains(key []byte) bool {
 
 // LocateKey searches for the region and range that the key is located.
 func (c *RegionCache) LocateKey(bo *retry.Backoffer, key []byte) (*KeyLocation, error) {
+	start := time.Now()
+	defer func() {
+		cost := time.Since(start)
+		if cost > time.Millisecond*50 {
+			logutil.Logger(bo.GetCtx()).Info("LocateKey takes too much time", zap.Duration("cost", cost))
+		}
+	}()
 	r, err := c.findRegionByKey(bo, key, false)
 	if err != nil {
 		return nil, err
