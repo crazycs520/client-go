@@ -1048,7 +1048,8 @@ func (c *RegionCache) LocateKey(bo *retry.Backoffer, key []byte) (*KeyLocation, 
 	defer func() {
 		cost := time.Since(start)
 		if cost > time.Millisecond*50 {
-			logutil.Logger(bo.GetCtx()).Info("LocateKey takes too much time", zap.Duration("cost", cost))
+			logutil.Logger(bo.GetCtx()).Info("LocateKey takes too much time", zap.Duration("cost", cost),
+				zap.Any("backoff-types", bo.GetBackoffSleepMS()))
 		}
 	}()
 	r, err := c.findRegionByKey(bo, key, false)
@@ -1629,6 +1630,17 @@ func filterUnavailablePeers(region *pd.Region) {
 // If the given key is the end key of the region that you want, you may set the second argument to true. This is useful
 // when processing in reverse order.
 func (c *RegionCache) loadRegion(bo *retry.Backoffer, key []byte, isEndKey bool) (*Region, error) {
+	tryTimes := 0
+	start := time.Now()
+	defer func() {
+		cost := time.Since(start)
+		if cost > time.Millisecond*50 {
+			logutil.Logger(bo.GetCtx()).Info("loadRegion takes too much time", zap.Duration("cost", cost),
+				zap.Int("try-times", tryTimes),
+				zap.Any("backoff-types", bo.GetBackoffSleepMS()),
+			)
+		}
+	}()
 	ctx := bo.GetCtx()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span1 := span.Tracer().StartSpan("loadRegion", opentracing.ChildOf(span.Context()))
@@ -1648,6 +1660,7 @@ func (c *RegionCache) loadRegion(bo *retry.Backoffer, key []byte, isEndKey bool)
 		start := time.Now()
 		var reg *pd.Region
 		var err error
+		tryTimes++
 		if searchPrev {
 			reg, err = c.pdClient.GetPrevRegion(ctx, key, pd.WithBuckets())
 		} else {
@@ -1660,6 +1673,7 @@ func (c *RegionCache) loadRegion(bo *retry.Backoffer, key []byte, isEndKey bool)
 			metrics.RegionCacheCounterWithGetCacheMissOK.Inc()
 		}
 		if err != nil {
+			logutil.Logger(bo.GetCtx()).Info("load region failed", zap.Error(err))
 			if apicodec.IsDecodeError(err) {
 				return nil, errors.Errorf("failed to decode region range key, key: %q, err: %v, encode_key: %q",
 					util.HexRegionKeyStr(key), err, util.HexRegionKey(c.codec.EncodeRegionKey(key)))
@@ -1668,6 +1682,7 @@ func (c *RegionCache) loadRegion(bo *retry.Backoffer, key []byte, isEndKey bool)
 			continue
 		}
 		if reg == nil || reg.Meta == nil {
+			logutil.Logger(bo.GetCtx()).Info("load region failed, region not found")
 			backoffErr = errors.Errorf("region not found for key %q, encode_key: %q", util.HexRegionKeyStr(key), util.HexRegionKey(c.codec.EncodeRegionKey(key)))
 			continue
 		}
