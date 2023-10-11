@@ -1649,6 +1649,7 @@ func (c *RegionCache) loadRegion(bo *retry.Backoffer, key []byte, isEndKey bool)
 			logutil.Logger(bo.GetCtx()).Info("loadRegion takes too much time", zap.Duration("cost", cost),
 				zap.Int("try-times", tryTimes),
 				zap.Any("backoff-types", bo.GetBackoffSleepMS()),
+				zap.Any("backoff-times", bo.GetBackoffTimes()),
 			)
 		}
 	}()
