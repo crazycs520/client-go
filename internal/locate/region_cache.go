@@ -1094,10 +1094,16 @@ func (c *RegionCache) LocateEndKey(bo *retry.Backoffer, key []byte) (*KeyLocatio
 }
 
 func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey bool) (r *Region, err error) {
+	start := time.Now()
 	r = c.searchCachedRegion(key, isEndKey)
 	if r == nil {
 		// load region when it is not exists or expired.
 		lr, err := c.loadRegion(bo, key, isEndKey)
+		if time.Since(start) > time.Millisecond*50 {
+			logutil.Logger(bo.GetCtx()).Info("loadRegion takes too much time", zap.Duration("cost", time.Since(start)),
+				zap.String("reason", "region not exists or expired"),
+				zap.Any("backoff-types", bo.GetBackoffSleepMS()))
+		}
 		if err != nil {
 			// no region data, return error if failure.
 			return nil, err
@@ -1110,6 +1116,11 @@ func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey 
 	} else if r.checkNeedReloadAndMarkUpdated() {
 		// load region when it be marked as need reload.
 		lr, err := c.loadRegion(bo, key, isEndKey)
+		if time.Since(start) > time.Millisecond*50 {
+			logutil.Logger(bo.GetCtx()).Info("loadRegion takes too much time", zap.Duration("cost", time.Since(start)),
+				zap.String("reason", "region need reload"),
+				zap.Any("backoff-types", bo.GetBackoffSleepMS()))
+		}
 		if err != nil {
 			// ignore error and use old region info.
 			logutil.Logger(bo.GetCtx()).Error("load region failure",
