@@ -1494,11 +1494,12 @@ func (s *RegionRequestSender) SendReqCtx(
 			return nil, nil, retryTimes, err
 		}
 		if regionErr != nil {
-			logutil.Logger(bo.GetCtx()).Info("send request got region error",
-				zap.String("err-message", regionErr.Message),
-				zap.String("err-string", regionErr.String()))
 			regionErrLogging := regionErrorToLogging(rpcCtx.Peer.GetId(), regionErr)
 			totalErrors[regionErrLogging]++
+			logutil.Logger(bo.GetCtx()).Info("send request got region error",
+				zap.String("err-label", regionErrLogging),
+				zap.String("err-message", regionErr.Message),
+				zap.String("err-string", regionErr.String()))
 			retry, err = s.onRegionError(bo, rpcCtx, req, regionErr)
 			if err != nil {
 				msg := fmt.Sprintf("send request on region error failed, err: %v", err.Error())
