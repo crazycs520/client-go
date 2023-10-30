@@ -768,14 +768,6 @@ const maxReplicaAttempt = 10
 // next creates the RPCContext of the current candidate replica.
 // It returns a SendError if runs out of all replicas or the cached region is invalidated.
 func (s *replicaSelector) next(bo *retry.Backoffer) (rpcCtx *RPCContext, err error) {
-	if _, err := util.EvalFailpoint("mockEmptyRPCContext"); err == nil {
-		if rnd := rand.Intn(100); rnd < 60 {
-			if rnd < 20 {
-				s.region.invalidate(Other)
-			}
-			return nil, nil
-		}
-	}
 	if !s.region.isValid() {
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("invalid").Inc()
 		return nil, nil
@@ -1417,6 +1409,19 @@ func (s *RegionRequestSender) sendReqToRegion(bo *retry.Backoffer, rpcCtx *RPCCo
 				zap.Stringer("req", req.Req.(fmt.Stringer)), zap.Stringer("ctx", &req.Context))
 			injectFailOnSend = true
 			err = errors.New("injected RPC error on send")
+		}
+	}
+	if _, err := util.EvalFailpoint("mockRegionErrNotLeader"); err == nil {
+		if rnd := rand.Intn(100); rnd < 80 {
+			if req.Type == tikvrpc.CmdCop && bo.GetTotalSleep() == 0 && s.replicaSelector != nil &&
+				s.replicaSelector.region != nil && s.replicaSelector.region.meta != nil {
+				length := len(s.replicaSelector.region.meta.Peers)
+				peer := *s.replicaSelector.region.meta.Peers[rand.Intn(length)]
+				time.Sleep(time.Microsecond * 950)
+				return &tikvrpc.Response{
+					Resp: &coprocessor.Response{RegionError: &errorpb.Error{NotLeader: &errorpb.NotLeader{Leader: &peer}}},
+				}, true, nil
+			}
 		}
 	}
 
