@@ -768,6 +768,14 @@ const maxReplicaAttempt = 10
 // next creates the RPCContext of the current candidate replica.
 // It returns a SendError if runs out of all replicas or the cached region is invalidated.
 func (s *replicaSelector) next(bo *retry.Backoffer) (rpcCtx *RPCContext, err error) {
+	if _, err := util.EvalFailpoint("mockEmptyRPCContext"); err == nil {
+		if rnd := rand.Intn(100); rnd < 60 {
+			if rnd < 20 {
+				s.region.invalidate(Other)
+			}
+			return nil, nil
+		}
+	}
 	if !s.region.isValid() {
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("invalid").Inc()
 		return nil, nil
