@@ -897,6 +897,8 @@ func (c *twoPhaseCommitter) preSplitRegion(ctx context.Context, group groupedMut
 // CommitSecondaryMaxBackoff is max sleep time of the 'commit' command
 const CommitSecondaryMaxBackoff = 41000
 
+var MockRandomSleepBeforeCommitSecondaryKeys = false
+
 // doActionOnGroupedMutations splits groups into batches (there is one group per region, and potentially many batches per group, but all mutations
 // in a batch will belong to the same region).
 func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *retry.Backoffer, action twoPhaseCommitAction, groups []groupedMutations) error {
@@ -1004,7 +1006,7 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *retry.Backoffer, action
 				}
 			}
 
-			if rand.Intn(100) < 10 {
+			if MockRandomSleepBeforeCommitSecondaryKeys && rand.Intn(100) < 10 {
 				time.Sleep(time.Second)
 			}
 			e := c.doActionOnBatches(secondaryBo, action, batchBuilder.allBatches())
