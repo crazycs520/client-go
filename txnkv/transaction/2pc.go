@@ -1004,6 +1004,9 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *retry.Backoffer, action
 				}
 			}
 
+			if rand.Intn(100) < 10 {
+				time.Sleep(time.Second)
+			}
 			e := c.doActionOnBatches(secondaryBo, action, batchBuilder.allBatches())
 			if e != nil {
 				logutil.BgLogger().Debug("2PC async doActionOnBatches",
