@@ -37,6 +37,7 @@ package locate
 import (
 	"context"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"math/rand"
 	"net"
 	"sync"
@@ -112,6 +113,35 @@ func (f *fnClient) CloseAddr(addr string) error {
 
 func (f *fnClient) SendRequest(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (*tikvrpc.Response, error) {
 	return f.fn(ctx, addr, req, timeout)
+}
+
+func TestOnRegionError(t *testing.T) {
+	s := new(testRegionRequestToSingleStoreSuite)
+	s.SetupTest()
+	defer s.TearDownTest()
+
+	req := tikvrpc.NewRequest(tikvrpc.CmdRawPut, &kvrpcpb.RawPutRequest{
+		Key:   []byte("key"),
+		Value: []byte("value"),
+	})
+	region, err := s.cache.LocateRegionByID(s.bo, s.region)
+	require.NoError(t, err)
+	require.NotNil(t, region)
+
+	// test stale command retry.
+	client := &fnClient{fn: func(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (response *tikvrpc.Response, err error) {
+		staleResp := &tikvrpc.Response{Resp: &kvrpcpb.GetResponse{
+			RegionError: &errorpb.Error{StaleCommand: &errorpb.StaleCommand{}},
+		}}
+		return staleResp, nil
+	}}
+	reqSender := NewRegionRequestSender(s.cache, client)
+	bo := retry.NewBackofferWithVars(context.Background(), 5, nil)
+	resp, _, err := reqSender.SendReq(bo, req, region.Region, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	regionErr, _ := resp.GetRegionError()
+	require.NotNil(t, regionErr)
 }
 
 func (s *testRegionRequestToSingleStoreSuite) TestOnRegionError() {
