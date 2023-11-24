@@ -37,6 +37,7 @@ package locate
 import (
 	"context"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -109,6 +110,49 @@ func (s *testRegionRequestToThreeStoresSuite) TestStoreTokenLimit() {
 	s.True(ok)
 	s.Equal(e.StoreID, uint64(1))
 	kv.StoreLimit.Store(oldStoreLimit)
+}
+
+func TestSwitchPeerWhenNoLeader(t *testing.T) {
+	s := new(testRegionRequestToThreeStoresSuite)
+	start := time.Now()
+	s.SetupTest()
+	fmt.Printf("setup takes %v\n", time.Since(start))
+	defer func() {
+		start = time.Now()
+		s.TearDownTest()
+		fmt.Printf("teardown takes %v\n", time.Since(start))
+	}()
+
+	cnt := 0
+	client := &fnClient{fn: func(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (response *tikvrpc.Response, err error) {
+		cnt++
+		switch cnt {
+		case 1:
+			return &tikvrpc.Response{Resp: &kvrpcpb.RawPutResponse{
+				RegionError: &errorpb.Error{NotLeader: &errorpb.NotLeader{}},
+			}}, nil
+		case 2, 3, 4, 5, 6, 7, 8, 9, 10:
+			return &tikvrpc.Response{Resp: &kvrpcpb.RawPutResponse{
+				RegionError: &errorpb.Error{RegionNotFound: &errorpb.RegionNotFound{}},
+			}}, nil
+		default:
+			return &tikvrpc.Response{Resp: &kvrpcpb.RawPutResponse{}}, nil
+		}
+	}}
+	sender := NewRegionRequestSender(s.cache, client)
+	sender.RegionRequestRuntimeStats = NewRegionRequestRuntimeStats()
+
+	req := tikvrpc.NewRequest(tikvrpc.CmdRawPut, &kvrpcpb.RawPutRequest{
+		Key:   []byte("key"),
+		Value: []byte("value"),
+	})
+	bo := retry.NewBackofferWithVars(context.Background(), 5, nil)
+	loc, err := s.cache.LocateKey(s.bo, []byte("key"))
+	require.NoError(t, err)
+	resp, _, err := sender.SendReq(bo, req, loc.Region, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "", sender.RegionRequestRuntimeStats.String())
 }
 
 func (s *testRegionRequestToThreeStoresSuite) TestSwitchPeerWhenNoLeader() {
