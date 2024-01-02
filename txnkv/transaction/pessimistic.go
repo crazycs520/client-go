@@ -36,6 +36,7 @@ package transaction
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync/atomic"
@@ -346,6 +347,7 @@ func (action actionPessimisticLock) handlePessimisticLockResponseNormalMode(
 	if len(locks) == 0 {
 		return false, nil
 	}
+	fmt.Printf("meet lock, len: %v, k: %v, lock.txn_id: %v =======\n\n", len(locks), locks[0].Key, locks[0].TxnID)
 
 	// Because we already waited on tikv, no need to Backoff here.
 	// tikv default will wait 3s(also the maximum wait value) when lock error occurs

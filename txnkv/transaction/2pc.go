@@ -39,6 +39,7 @@ import (
 	"context"
 	"encoding/hex"
 	errors2 "errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
@@ -1173,6 +1174,7 @@ func keepAlive(c *twoPhaseCommitter, closeCh chan struct{}, primaryKey []byte, l
 	ticker := time.NewTicker(time.Duration(atomic.LoadUint64(&ManagedLockTTL)) * time.Millisecond / 2)
 	defer ticker.Stop()
 	startKeepAlive := time.Now()
+	fmt.Printf("start keepAlive %v %s==========\n\n\n", config.GetGlobalConfig().MaxTxnTTL, time.Duration(atomic.LoadUint64(&ManagedLockTTL))*time.Millisecond/2)
 	defer func() {
 		metrics.TiKVTTLManagerHistogram.Observe(time.Since(startKeepAlive).Seconds())
 	}()
