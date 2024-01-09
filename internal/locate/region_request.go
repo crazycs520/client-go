@@ -102,7 +102,6 @@ func LoadShuttingDown() uint32 {
 // split, so we simply return the error to caller.
 type RegionRequestSender struct {
 	regionCache       *RegionCache
-	apiVersion        kvrpcpb.APIVersion
 	client            client.Client
 	storeAddr         string
 	rpcError          error
@@ -199,7 +198,6 @@ func RecordRegionRequestRuntimeStats(stats map[tikvrpc.CmdType]*RPCRuntimeStats,
 func NewRegionRequestSender(regionCache *RegionCache, client client.Client) *RegionRequestSender {
 	return &RegionRequestSender{
 		regionCache: regionCache,
-		apiVersion:  regionCache.codec.GetAPIVersion(),
 		client:      client,
 	}
 }
@@ -263,6 +261,14 @@ func (r *replica) isEpochStale() bool {
 
 func (r *replica) isExhausted(maxAttempt int) bool {
 	return r.attempts >= maxAttempt
+}
+
+type ReplicaSelector interface {
+	next(bo *retry.Backoffer) (rpcCtx *RPCContext, err error)
+
+	onRegionError(bo *retry.Backoffer, ctx *RPCContext, req *tikvrpc.Request, regionErr *errorpb.Error) (shouldRetry bool, err error)
+
+	onSendFail(bo *retry.Backoffer, ctx *RPCContext, req *tikvrpc.Request, err error) error
 }
 
 type replicaSelector struct {
@@ -907,6 +913,15 @@ func (state *invalidLeader) next(_ *retry.Backoffer, _ *replicaSelector) (*RPCCo
 	return nil, nil
 }
 
+type accessTiFlashReplica struct {
+	stateBase
+	regionID RegionVerID
+}
+
+func (state *accessTiFlashReplica) next(bo *retry.Backoffer, selector *replicaSelector) (*RPCContext, error) {
+	return selector.regionCache.GetTiFlashRPCContext(bo, state.regionID, true, LabelFilterNoTiFlashWriteNode)
+}
+
 // newReplicaSelector creates a replicaSelector which selects replicas according to reqType and opts.
 // opts is currently only effective for follower read.
 func newReplicaSelector(
@@ -985,7 +1000,7 @@ func (s *replicaSelector) next(bo *retry.Backoffer) (rpcCtx *RPCContext, err err
 
 	s.targetIdx = -1
 	s.proxyIdx = -1
-	s.refreshRegionStore()
+	//s.refreshRegionStore()
 	for {
 		rpcCtx, err = s.state.next(bo, s)
 		if _, isStateChanged := err.(stateChanged); !isStateChanged {
