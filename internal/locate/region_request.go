@@ -275,7 +275,7 @@ type replicaSelector struct {
 	// replicas[targetIdx] is the replica handling the request this time
 	targetIdx AccessIndex
 	// replicas[proxyIdx] is the store used to redirect requests this time
-	proxyIdx AccessIndex
+	proxyIdx AccessIndex // try remove it.
 	// TiKV can reject the request when its estimated wait duration exceeds busyThreshold.
 	// Then, the client will receive a ServerIsBusy error and choose another replica to retry.
 	busyThreshold time.Duration
@@ -404,10 +404,6 @@ type accessKnownLeader struct {
 func (state *accessKnownLeader) next(bo *retry.Backoffer, selector *replicaSelector) (*RPCContext, error) {
 	leader := selector.replicas[state.leaderIdx]
 	liveness := leader.store.getLivenessState()
-	if liveness == unreachable && selector.regionCache.enableForwarding {
-		selector.state = &tryNewProxy{leaderIdx: state.leaderIdx}
-		return nil, stateChanged{}
-	}
 	// If hibernate region is enabled and the leader is not reachable, the raft group
 	// will not be wakened up and re-elect the leader until the follower receives
 	// a request. So, before the new leader is elected, we should not send requests
@@ -431,11 +427,6 @@ func (state *accessKnownLeader) next(bo *retry.Backoffer, selector *replicaSelec
 
 func (state *accessKnownLeader) onSendFailure(bo *retry.Backoffer, selector *replicaSelector, cause error) {
 	liveness := selector.checkLiveness(bo, selector.targetReplica())
-	// Only enable forwarding when unreachable to avoid using proxy to access a TiKV that cannot serve.
-	if liveness == unreachable && len(selector.replicas) > 1 && selector.regionCache.enableForwarding {
-		selector.state = &accessByKnownProxy{leaderIdx: state.leaderIdx}
-		return
-	}
 	if liveness != reachable || selector.targetReplica().isExhausted(maxReplicaAttempt) {
 		selector.state = &tryFollower{leaderIdx: state.leaderIdx, lastIdx: state.leaderIdx, fromAccessKnownLeader: true}
 	}
@@ -940,11 +931,7 @@ func newReplicaSelector(
 	}
 	var state selectorState
 	if !req.ReplicaReadType.IsFollowerRead() {
-		if regionCache.enableForwarding && regionStore.proxyTiKVIdx >= 0 {
-			state = &accessByKnownProxy{leaderIdx: regionStore.workTiKVIdx}
-		} else {
-			state = &accessKnownLeader{leaderIdx: regionStore.workTiKVIdx}
-		}
+		state = &accessKnownLeader{leaderIdx: regionStore.workTiKVIdx}
 	} else {
 		if req.ReplicaReadType == kv.ReplicaReadPreferLeader {
 			WithPerferLeader()(&option)

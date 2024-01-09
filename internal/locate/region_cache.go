@@ -40,7 +40,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
-	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -824,19 +823,6 @@ func (c *RegionCache) GetTiKVRPCContext(bo *retry.Backoffer, id RegionVerID, rep
 		proxyStore *Store
 		proxyAddr  string
 	)
-	if c.enableForwarding && isLeaderReq {
-		if store.getLivenessState() == reachable {
-			regionStore.unsetProxyStoreIfNeeded(cachedRegion)
-		} else {
-			proxyStore, _, _ = c.getProxyStore(cachedRegion, store, regionStore, accessIdx)
-			if proxyStore != nil {
-				proxyAddr, err = c.getStoreAddr(bo, cachedRegion, proxyStore)
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
 
 	return &RPCContext{
 		Region:     id,
@@ -1934,48 +1920,6 @@ func (c *RegionCache) getStoreAddr(bo *retry.Backoffer, region *Region, store *S
 	default:
 		panic("unsupported resolve state")
 	}
-}
-
-func (c *RegionCache) getProxyStore(region *Region, store *Store, rs *regionStore, workStoreIdx AccessIndex) (proxyStore *Store, proxyAccessIdx AccessIndex, proxyStoreIdx int) {
-	if !c.enableForwarding || store.storeType != tikvrpc.TiKV || store.getLivenessState() == reachable {
-		return
-	}
-
-	if rs.proxyTiKVIdx >= 0 {
-		storeIdx, proxyStore := rs.accessStore(tiKVOnly, rs.proxyTiKVIdx)
-		return proxyStore, rs.proxyTiKVIdx, storeIdx
-	}
-
-	tikvNum := rs.accessStoreNum(tiKVOnly)
-	if tikvNum <= 1 {
-		return
-	}
-
-	// Randomly select an non-leader peer
-	first := rand.Intn(tikvNum - 1)
-	if first >= int(workStoreIdx) {
-		first = (first + 1) % tikvNum
-	}
-
-	// If the current selected peer is not reachable, switch to the next one, until a reachable peer is found or all
-	// peers are checked.
-	for i := 0; i < tikvNum; i++ {
-		index := (i + first) % tikvNum
-		// Skip work store which is the actual store to be accessed
-		if index == int(workStoreIdx) {
-			continue
-		}
-		storeIdx, store := rs.accessStore(tiKVOnly, AccessIndex(index))
-		// Skip unreachable stores.
-		if store.getLivenessState() == unreachable {
-			continue
-		}
-
-		rs.setProxyStoreIdx(region, AccessIndex(index))
-		return store, AccessIndex(index), storeIdx
-	}
-
-	return nil, 0, 0
 }
 
 // changeToActiveStore replace the deleted store in the region by an up-to-date store in the stores map.
