@@ -680,9 +680,7 @@ type RPCContext struct {
 	Store         *Store
 	Addr          string
 	AccessMode    accessMode
-	ProxyStore    *Store // nil means proxy is not used
-	ProxyAddr     string // valid when ProxyStore is not nil
-	TiKVNum       int    // Number of TiKV nodes among the region's peers. Assuming non-TiKV peers are all TiFlash peers.
+	TiKVNum       int // Number of TiKV nodes among the region's peers. Assuming non-TiKV peers are all TiFlash peers.
 	BucketVersion uint64
 
 	contextPatcher contextPatcher // kvrpcpb.Context fields that need to be overridden
@@ -695,9 +693,6 @@ func (c *RPCContext) String() string {
 	}
 	res := fmt.Sprintf("region ID: %d, meta: %s, peer: %s, addr: %s, idx: %d, reqStoreType: %s, runStoreType: %s",
 		c.Region.GetID(), c.Meta, c.Peer, c.Addr, c.AccessIdx, c.AccessMode, runStoreType)
-	if c.ProxyStore != nil {
-		res += fmt.Sprintf(", proxy store id: %d, proxy addr: %s", c.ProxyStore.storeID, c.ProxyStore.addr)
-	}
 	return res
 }
 
@@ -819,11 +814,6 @@ func (c *RegionCache) GetTiKVRPCContext(bo *retry.Backoffer, id RegionVerID, rep
 		return nil, nil
 	}
 
-	var (
-		proxyStore *Store
-		proxyAddr  string
-	)
-
 	return &RPCContext{
 		Region:     id,
 		Meta:       cachedRegion.meta,
@@ -832,8 +822,6 @@ func (c *RegionCache) GetTiKVRPCContext(bo *retry.Backoffer, id RegionVerID, rep
 		Store:      store,
 		Addr:       addr,
 		AccessMode: tiKVOnly,
-		ProxyStore: proxyStore,
-		ProxyAddr:  proxyAddr,
 		TiKVNum:    regionStore.accessStoreNum(tiKVOnly),
 	}, nil
 }

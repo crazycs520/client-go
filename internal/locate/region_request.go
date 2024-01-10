@@ -274,8 +274,6 @@ type replicaSelector struct {
 	state       selectorState
 	// replicas[targetIdx] is the replica handling the request this time
 	targetIdx AccessIndex
-	// replicas[proxyIdx] is the store used to redirect requests this time
-	proxyIdx AccessIndex // try remove it.
 	// TiKV can reject the request when its estimated wait duration exceeds busyThreshold.
 	// Then, the client will receive a ServerIsBusy error and choose another replica to retry.
 	busyThreshold time.Duration
@@ -289,12 +287,8 @@ func selectorStateToString(state selectorState) string {
 			replicaSelectorState = "accessKnownLeader"
 		case *accessFollower:
 			replicaSelectorState = "accessFollower"
-		case *accessByKnownProxy:
-			replicaSelectorState = "accessByKnownProxy"
 		case *tryFollower:
 			replicaSelectorState = "tryFollower"
-		case *tryNewProxy:
-			replicaSelectorState = "tryNewProxy"
 		case *invalidLeader:
 			replicaSelectorState = "invalidLeader"
 		case *invalidStore:
@@ -534,105 +528,6 @@ func (state *tryFollower) onSendFailure(bo *retry.Backoffer, selector *replicaSe
 	if selector.checkLiveness(bo, selector.targetReplica()) != reachable {
 		selector.invalidateReplicaStore(selector.targetReplica(), cause)
 	}
-}
-
-// accessByKnownProxy is the state where we are sending requests through
-// regionStore.proxyTiKVIdx as a proxy.
-type accessByKnownProxy struct {
-	stateBase
-	leaderIdx AccessIndex
-}
-
-func (state *accessByKnownProxy) next(bo *retry.Backoffer, selector *replicaSelector) (*RPCContext, error) {
-	leader := selector.replicas[state.leaderIdx]
-	if leader.store.getLivenessState() == reachable {
-		selector.regionStore.unsetProxyStoreIfNeeded(selector.region)
-		selector.state = &accessKnownLeader{leaderIdx: state.leaderIdx}
-		return nil, stateChanged{}
-	}
-
-	if selector.regionStore.proxyTiKVIdx >= 0 {
-		selector.targetIdx = state.leaderIdx
-		selector.proxyIdx = selector.regionStore.proxyTiKVIdx
-		return selector.buildRPCContext(bo)
-	}
-
-	selector.state = &tryNewProxy{leaderIdx: state.leaderIdx}
-	return nil, stateChanged{}
-}
-
-func (state *accessByKnownProxy) onSendFailure(bo *retry.Backoffer, selector *replicaSelector, cause error) {
-	selector.state = &tryNewProxy{leaderIdx: state.leaderIdx}
-	if selector.checkLiveness(bo, selector.proxyReplica()) != reachable {
-		selector.invalidateReplicaStore(selector.proxyReplica(), cause)
-	}
-}
-
-func (state *accessByKnownProxy) onNoLeader(selector *replicaSelector) {
-	selector.state = &invalidLeader{}
-}
-
-// tryNewProxy is the state where we try to find a node from followers as proxy.
-type tryNewProxy struct {
-	leaderIdx AccessIndex
-}
-
-func (state *tryNewProxy) next(bo *retry.Backoffer, selector *replicaSelector) (*RPCContext, error) {
-	leader := selector.replicas[state.leaderIdx]
-	if leader.store.getLivenessState() == reachable {
-		selector.regionStore.unsetProxyStoreIfNeeded(selector.region)
-		selector.state = &accessKnownLeader{leaderIdx: state.leaderIdx}
-		return nil, stateChanged{}
-	}
-
-	candidateNum := 0
-	for idx, replica := range selector.replicas {
-		if state.isCandidate(AccessIndex(idx), replica) {
-			candidateNum++
-		}
-	}
-
-	// If all followers are tried as a proxy and fail, mark the leader store invalid, then backoff and retry.
-	if candidateNum == 0 {
-		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("exhausted").Inc()
-		selector.invalidateReplicaStore(leader, errors.Errorf("all followers are tried as proxy but fail"))
-		selector.region.scheduleReload()
-		return nil, nil
-	}
-
-	// Skip advanceCnt valid candidates to find a proxy peer randomly
-	advanceCnt := rand.Intn(candidateNum)
-	for idx, replica := range selector.replicas {
-		if !state.isCandidate(AccessIndex(idx), replica) {
-			continue
-		}
-		if advanceCnt == 0 {
-			selector.targetIdx = state.leaderIdx
-			selector.proxyIdx = AccessIndex(idx)
-			break
-		}
-		advanceCnt--
-	}
-	return selector.buildRPCContext(bo)
-}
-
-func (state *tryNewProxy) isCandidate(idx AccessIndex, replica *replica) bool {
-	// Try each peer only once
-	return idx != state.leaderIdx && !replica.isExhausted(1)
-}
-
-func (state *tryNewProxy) onSendSuccess(selector *replicaSelector) {
-	selector.regionStore.setProxyStoreIdx(selector.region, selector.proxyIdx)
-}
-
-func (state *tryNewProxy) onSendFailure(bo *retry.Backoffer, selector *replicaSelector, cause error) {
-	if selector.checkLiveness(bo, selector.proxyReplica()) != reachable {
-		selector.invalidateReplicaStore(selector.proxyReplica(), cause)
-	}
-}
-
-func (state *tryNewProxy) onNoLeader(selector *replicaSelector) {
-	selector.state = &invalidLeader{}
 }
 
 // accessFollower is the state where we are sending requests to TiKV followers.
@@ -955,7 +850,6 @@ func newReplicaSelector(
 		option.labels,
 		state,
 		-1,
-		-1,
 		time.Duration(req.BusyThresholdMs) * time.Millisecond,
 	}, nil
 }
@@ -971,7 +865,6 @@ func (s *replicaSelector) next(bo *retry.Backoffer) (rpcCtx *RPCContext, err err
 	}
 
 	s.targetIdx = -1
-	s.proxyIdx = -1
 	s.refreshRegionStore()
 	for {
 		rpcCtx, err = s.state.next(bo, s)
@@ -984,13 +877,6 @@ func (s *replicaSelector) next(bo *retry.Backoffer) (rpcCtx *RPCContext, err err
 func (s *replicaSelector) targetReplica() *replica {
 	if s.targetIdx >= 0 && int(s.targetIdx) < len(s.replicas) {
 		return s.replicas[s.targetIdx]
-	}
-	return nil
-}
-
-func (s *replicaSelector) proxyReplica() *replica {
-	if s.proxyIdx >= 0 && int(s.proxyIdx) < len(s.replicas) {
-		return s.replicas[s.proxyIdx]
 	}
 	return nil
 }
@@ -1031,11 +917,10 @@ func (s *replicaSelector) refreshRegionStore() {
 }
 
 func (s *replicaSelector) buildRPCContext(bo *retry.Backoffer) (*RPCContext, error) {
-	targetReplica, proxyReplica := s.targetReplica(), s.proxyReplica()
+	targetReplica := s.targetReplica()
 
 	// Backoff and retry if no replica is selected or the selected replica is stale
-	if targetReplica == nil || targetReplica.isEpochStale() ||
-		(proxyReplica != nil && proxyReplica.isEpochStale()) {
+	if targetReplica == nil || targetReplica.isEpochStale() {
 		// TODO(youjiali1995): Is it necessary to invalidate the region?
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("stale_store").Inc()
 		s.invalidateRegion()
@@ -1061,20 +946,6 @@ func (s *replicaSelector) buildRPCContext(bo *retry.Backoffer) (*RPCContext, err
 	}
 	rpcCtx.Addr = addr
 	targetReplica.attempts++
-
-	// Set proxy addr
-	if proxyReplica != nil {
-		addr, err = s.regionCache.getStoreAddr(bo, s.region, proxyReplica.store)
-		if err != nil {
-			return nil, err
-		}
-		if len(addr) == 0 {
-			return nil, nil
-		}
-		rpcCtx.ProxyStore = proxyReplica.store
-		rpcCtx.ProxyAddr = addr
-		proxyReplica.attempts++
-	}
 
 	return rpcCtx, nil
 }
@@ -1618,12 +1489,7 @@ func (s *RegionRequestSender) sendReqToRegion(
 	// sendToAddr is the first target address that will receive the request. If proxy is used, sendToAddr will point to
 	// the proxy that will forward the request to the final target.
 	sendToAddr := rpcCtx.Addr
-	if rpcCtx.ProxyStore == nil {
-		req.ForwardedHost = ""
-	} else {
-		req.ForwardedHost = rpcCtx.Addr
-		sendToAddr = rpcCtx.ProxyAddr
-	}
+	req.ForwardedHost = ""
 
 	// Count the replica number as the RU cost factor.
 	req.ReplicaNumber = 1
@@ -1720,16 +1586,6 @@ func (s *RegionRequestSender) sendReqToRegion(
 				resp = nil
 			}
 		}
-	}
-
-	if rpcCtx.ProxyStore != nil {
-		fromStore := strconv.FormatUint(rpcCtx.ProxyStore.storeID, 10)
-		toStore := strconv.FormatUint(rpcCtx.Store.storeID, 10)
-		result := "ok"
-		if err != nil {
-			result = "fail"
-		}
-		metrics.TiKVForwardRequestCounter.WithLabelValues(fromStore, toStore, req.Type.String(), result).Inc()
 	}
 
 	if err != nil {
@@ -1860,9 +1716,6 @@ func (s *RegionRequestSender) NeedReloadRegion(ctx *RPCContext) (need bool) {
 		s.failProxyStoreIDs = make(map[uint64]struct{})
 	}
 	s.failStoreIDs[ctx.Store.storeID] = struct{}{}
-	if ctx.ProxyStore != nil {
-		s.failProxyStoreIDs[ctx.ProxyStore.storeID] = struct{}{}
-	}
 
 	if ctx.AccessMode == tiKVOnly && len(s.failStoreIDs)+len(s.failProxyStoreIDs) >= ctx.TiKVNum {
 		need = true
