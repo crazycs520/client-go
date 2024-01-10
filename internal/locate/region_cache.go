@@ -2813,6 +2813,10 @@ func (s *Store) GetLabelValue(key string) (string, bool) {
 	return "", false
 }
 
+func (s *Store) setLivenessState(l livenessState) {
+	atomic.StoreUint32(&s.livenessState, uint32(l))
+}
+
 // getLivenessState gets the cached liveness state of the store.
 // When it's not reachable, a goroutine will update the state in background.
 // To get the accurate liveness state, use checkLiveness instead.
@@ -2904,7 +2908,7 @@ func (s *Store) checkUntilHealth(c *RegionCache) {
 
 				return
 			}
-			atomic.StoreUint32(&s.livenessState, uint32(l))
+			s.setLivenessState(l)
 		}
 	}
 }

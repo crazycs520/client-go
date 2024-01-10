@@ -106,6 +106,7 @@ type RegionRequestSender struct {
 	storeAddr         string
 	rpcError          error
 	replicaSelector   *replicaSelector
+	selector          ReplicaSelector
 	failStoreIDs      map[uint64]struct{}
 	failProxyStoreIDs map[uint64]struct{}
 	RegionRequestRuntimeStats
