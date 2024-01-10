@@ -263,14 +263,6 @@ func (r *replica) isExhausted(maxAttempt int) bool {
 	return r.attempts >= maxAttempt
 }
 
-type ReplicaSelector interface {
-	next(bo *retry.Backoffer) (rpcCtx *RPCContext, err error)
-
-	onRegionError(bo *retry.Backoffer, ctx *RPCContext, req *tikvrpc.Request, regionErr *errorpb.Error) (shouldRetry bool, err error)
-
-	onSendFail(bo *retry.Backoffer, ctx *RPCContext, req *tikvrpc.Request, err error) error
-}
-
 type replicaSelector struct {
 	regionCache *RegionCache
 	region      *Region
