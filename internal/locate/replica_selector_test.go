@@ -96,12 +96,13 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorByFollower() {
 			s.Nil(err)
 			if leaderIdx != AccessIndex(mi) {
 				// match label in follower
-				for i := 1; i <= 3; i++ {
+				for i := 1; i <= 6; i++ {
 					rpcCtx, err := selector.next(bo)
 					s.Nil(err)
 					rc := s.cache.GetCachedRegionWithRLock(region.Region)
 					s.NotNil(rc)
 					if i == 1 {
+						// first try the match-label peer.
 						s.NotNil(rpcCtx)
 						s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
 						s.Equal(selector.targetIdx, AccessIndex(mi))
@@ -110,6 +111,7 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorByFollower() {
 						s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
 						s.Equal(replica.attempts, 1)
 					} else if i == 2 {
+						// then try the leader. :), is this expected? I thought ReadFollower will only try follower, or this is not compatible with label match?
 						s.NotNil(rpcCtx)
 						s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
 						s.Equal(selector.targetIdx, leaderIdx)
@@ -118,12 +120,45 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorByFollower() {
 						s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
 						s.Equal(replica.attempts, 1)
 					} else {
-						s.Nil(rpcCtx)
+						if !staleRead {
+							s.Nil(rpcCtx)
+						} else {
+							if i == 3 {
+								// retry in leader again? this is not expected.
+								s.NotNil(rpcCtx)
+								s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
+								s.Equal(selector.targetIdx, leaderIdx)
+								replica := selector.targetReplica()
+								s.False(replica.store.IsLabelsMatch(labels))
+								s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
+								s.Equal(replica.attempts, 2)
+							} else if i == 4 {
+								// retry the match-label peer again. this is not expected?
+								s.NotNil(rpcCtx)
+								s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
+								s.Equal(selector.targetIdx, AccessIndex(mi))
+								replica := selector.targetReplica()
+								s.True(replica.store.IsLabelsMatch(labels))
+								s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
+								s.Equal(replica.attempts, 2)
+							} else if i == 5 {
+								s.NotNil(rpcCtx)
+								s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
+								s.NotEqual(selector.targetIdx, AccessIndex(mi))
+								s.NotEqual(selector.targetIdx, leaderIdx)
+								replica := selector.targetReplica()
+								s.False(replica.store.IsLabelsMatch(labels))
+								s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
+								s.Equal(replica.attempts, 1)
+							} else {
+								s.Nil(rpcCtx)
+							}
+						}
 					}
 				}
 			} else {
 				// match label in leader
-				for i := 1; i <= 3; i++ {
+				for i := 1; i <= 5; i++ {
 					rpcCtx, err := selector.next(bo)
 					s.Nil(err)
 					rc := s.cache.GetCachedRegionWithRLock(region.Region)
@@ -149,6 +184,15 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorByFollower() {
 								s.True(replica.store.IsLabelsMatch(labels))
 								s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
 								s.Equal(replica.attempts, 2)
+							} else if i <= 4 {
+								// stale read will try follower.
+								s.NotNil(rpcCtx)
+								s.Equal(rpcCtx.Peer.Role, metapb.PeerRole_Voter)
+								s.NotEqual(selector.targetIdx, leaderIdx)
+								replica := selector.targetReplica()
+								s.False(replica.store.IsLabelsMatch(labels))
+								s.Equal(rpcCtx.Peer.Id, replica.peer.Id)
+								s.Equal(replica.attempts, 1)
 							} else {
 								s.Nil(rpcCtx)
 							}
