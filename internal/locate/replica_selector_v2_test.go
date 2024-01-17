@@ -463,3 +463,86 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorV2ByStaleRead()
 		selector.replicas[mi].store.labels = nil
 	}
 }
+
+func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorV2ByMixedCalculateScore() {
+	req := tikvrpc.NewReplicaReadRequest(tikvrpc.CmdGet, &kvrpcpb.GetRequest{Key: []byte("a")}, kv.ReplicaReadMixed, nil, kvrpcpb.Context{})
+	region, err := s.cache.LocateKey(s.bo, []byte("a"))
+	s.Nil(err)
+	s.NotNil(region)
+	selector, err := newReplicaSelectorV2(s.cache, region.Region, req, tikvrpc.TiKV)
+	s.Nil(err)
+	for i, r := range selector.replicas {
+		isLeader := r.peer.Id == selector.region.GetLeaderPeerID()
+		s.Equal(isLeader, AccessIndex(i) == selector.region.getStore().workTiKVIdx)
+		strategy := ReplicaSelectMixedStrategy{}
+		score := strategy.calculateScore(r, isLeader)
+		s.Equal(r.store.isSlow(), false)
+		if isLeader {
+			s.Equal(score, 4)
+		} else {
+			s.Equal(score, 5)
+		}
+		r.store.slowScore.avgScore = slowScoreThreshold + 1
+		s.Equal(r.store.isSlow(), true)
+		score = strategy.calculateScore(r, isLeader)
+		if isLeader {
+			s.Equal(score, 3)
+		} else {
+			s.Equal(score, 4)
+		}
+		strategy.tryLeader = true
+		score = strategy.calculateScore(r, isLeader)
+		s.Equal(score, 4)
+		strategy.preferLeader = true
+		score = strategy.calculateScore(r, isLeader)
+		if isLeader {
+			s.Equal(score, 5)
+		} else {
+			s.Equal(score, 4)
+		}
+		strategy.learnerOnly = true
+		strategy.tryLeader = false
+		strategy.preferLeader = false
+		score = strategy.calculateScore(r, isLeader)
+		s.Equal(score, 3)
+		labels := []*metapb.StoreLabel{
+			{
+				Key:   "zone",
+				Value: "us-west-1",
+			},
+		}
+		strategy.labels = labels
+		score = strategy.calculateScore(r, isLeader)
+		s.Equal(score, 0)
+
+		strategy = ReplicaSelectMixedStrategy{
+			tryLeader: true,
+			labels:    labels,
+		}
+		score = strategy.calculateScore(r, isLeader)
+		if isLeader {
+			s.Equal(score, 2)
+		} else {
+			s.Equal(score, 1)
+		}
+
+		strategy = ReplicaSelectMixedStrategy{
+			preferLeader: true,
+			labels:       labels,
+		}
+		score = strategy.calculateScore(r, isLeader)
+		if isLeader {
+			s.Equal(score, 2)
+		} else {
+			s.Equal(score, 1)
+		}
+		r.store.labels = labels
+		score = strategy.calculateScore(r, isLeader)
+		if isLeader {
+			s.Equal(score, 5)
+		} else {
+			s.Equal(score, 4)
+		}
+		r.store.labels = nil
+	}
+}
