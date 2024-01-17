@@ -24,23 +24,120 @@ type Replica struct {
 type ReplicaSelector struct {
 	endpointTp      tikvrpc.EndpointType
 	replicaReadType kv.ReplicaReadType
+	isStaleRead     bool
+	isReadOnlyReq   bool
 
 	regionCache *RegionCache
 	region      *Region
 	replicas    []*Replica
-	targetIdx   AccessIndex
+	option      storeSelectorOp
+	target      *Replica
+	attempts    int
 }
 
-func (s *ReplicaSelector) targetReplica() *Replica {
-	if s.targetIdx >= 0 && int(s.targetIdx) < len(s.replicas) {
-		return s.replicas[s.targetIdx]
+func newReplicaSelectorV2(
+	regionCache *RegionCache, regionID RegionVerID, req *tikvrpc.Request, et tikvrpc.EndpointType, opts ...StoreSelectorOption,
+) (*ReplicaSelector, error) {
+	cachedRegion := regionCache.GetCachedRegionWithRLock(regionID)
+	if cachedRegion == nil || !cachedRegion.isValid() {
+		return nil, errors.New("cached region invalid")
 	}
-	return nil
+
+	regionStore := cachedRegion.getStore()
+	replicas := make([]*Replica, 0, regionStore.accessStoreNum(tiKVOnly))
+	for _, storeIdx := range regionStore.accessIndex[tiKVOnly] {
+		replicas = append(
+			replicas, &Replica{
+				store:    regionStore.stores[storeIdx],
+				peer:     cachedRegion.meta.Peers[storeIdx],
+				epoch:    regionStore.storeEpochs[storeIdx],
+				attempts: 0,
+			},
+		)
+	}
+
+	option := storeSelectorOp{}
+	for _, op := range opts {
+		op(&option)
+	}
+	if req.ReplicaReadType == kv.ReplicaReadPreferLeader {
+		WithPerferLeader()(&option)
+	}
+	isReadOnlyReq := false
+	switch req.Type {
+	case tikvrpc.CmdGet, tikvrpc.CmdBatchGet, tikvrpc.CmdScan,
+		tikvrpc.CmdCop, tikvrpc.CmdBatchCop, tikvrpc.CmdCopStream:
+		isReadOnlyReq = true
+	}
+
+	return &ReplicaSelector{
+		et,
+		req.ReplicaReadType,
+		req.StaleRead,
+		isReadOnlyReq,
+		regionCache,
+		cachedRegion,
+		replicas,
+		option,
+		nil,
+		0,
+	}, nil
 }
 
-type ReplicaSelectStrategy interface {
-	//calculateScore(replica *Replica) int
-	next() *RPCContext
+func (s *ReplicaSelector) next(bo *retry.Backoffer, req *tikvrpc.Request) (rpcCtx *RPCContext, err error) {
+	if !s.region.isValid() {
+		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("invalid").Inc()
+		return nil, nil
+	}
+
+	s.attempts++
+	s.target = nil
+	switch s.replicaReadType {
+	case kv.ReplicaReadLeader:
+		strategy := ReplicaSelectLeaderStrategy{}
+		s.target = strategy.next(s.replicas, s.region)
+		if s.target == nil {
+			strategy := ReplicaSelectMixedStrategy{}
+			s.target = strategy.next(s, s.replicas, s.region)
+		}
+	default:
+		if s.isStaleRead && s.attempts == 2 {
+			// For stale read second retry, try leader by leader read first.
+			strategy := ReplicaSelectLeaderStrategy{}
+			s.target = strategy.next(s.replicas, s.region)
+			if s.target != nil {
+				req.StaleRead = false
+				req.ReplicaRead = false
+			}
+		}
+		if s.target == nil {
+			strategy := ReplicaSelectMixedStrategy{
+				staleRead:    s.isStaleRead,
+				tryLeader:    req.ReplicaReadType == kv.ReplicaReadMixed || req.ReplicaReadType == kv.ReplicaReadPreferLeader,
+				preferLeader: req.ReplicaReadType == kv.ReplicaReadPreferLeader,
+				learnerOnly:  req.ReplicaReadType == kv.ReplicaReadLearner,
+				labels:       s.option.labels,
+				stores:       s.option.stores,
+			}
+			s.target = strategy.next(s, s.replicas, s.region)
+			if s.target != nil {
+				if s.isStaleRead && s.attempts == 1 {
+					// stale-read will only be used when first access.
+					req.StaleRead = true
+					req.ReplicaRead = false
+				} else {
+					// always use replica.
+					// need check req read/write type?
+					req.StaleRead = false
+					req.ReplicaRead = s.isReadOnlyReq
+				}
+			}
+		}
+	}
+	if s.target == nil {
+		return nil, nil
+	}
+	return s.buildRPCContext(bo, s.target)
 }
 
 const (
@@ -55,8 +152,6 @@ func (s *ReplicaSelectLeaderStrategy) next(replicas []*Replica, region *Region) 
 	if leader.store.getLivenessState() == reachable && leader.attempts < maxReplicaAttempt {
 		return leader
 	}
-	// try idle replica?
-	// try follower?
 	return nil
 }
 
@@ -74,12 +169,14 @@ func (s *ReplicaSelectMixedStrategy) next(selector *ReplicaSelector, replicas []
 	maxScore := -1
 	maxScoreIdxes := make([]int, 0, len(replicas))
 	reloadRegion := false
+	hasDeadlineExceededErr := false
 	for i, r := range replicas {
 		epochStale := r.isEpochStale()
 		liveness := r.store.getLivenessState()
 		if epochStale && liveness == reachable && r.store.getResolveState() == resolved {
 			reloadRegion = true
 		}
+		hasDeadlineExceededErr = hasDeadlineExceededErr || r.deadlineErrUsingConfTimeout
 		if epochStale || r.isExhausted(maxFollowerReplicaAttempt) || liveness == unreachable || r.deadlineErrUsingConfTimeout {
 			// the replica is not available.
 			continue
@@ -100,6 +197,7 @@ func (s *ReplicaSelectMixedStrategy) next(selector *ReplicaSelector, replicas []
 		return replicas[idx]
 	} else if len(maxScoreIdxes) > 1 {
 		// if there are more than one replica with the same max score, we will randomly select one
+		// todo: use store slow score to select a faster one.
 		idx := maxScoreIdxes[rand.Intn(len(maxScoreIdxes))]
 		return replicas[idx]
 	}
@@ -107,23 +205,16 @@ func (s *ReplicaSelectMixedStrategy) next(selector *ReplicaSelector, replicas []
 	leader := replicas[leaderIdx]
 	leaderEpochStale := leader.isEpochStale()
 	leaderUnreachable := leader.store.getLivenessState() != reachable
-	leaderExhausted := s.IsLeaderExhausted(leader)
+	leaderExhausted := leader.isExhausted(maxFollowerReplicaAttempt)
 	leaderInvalid := leaderEpochStale || leaderUnreachable || leaderExhausted
-	if leaderInvalid || leader.deadlineErrUsingConfTimeout {
-		// todo: consider log in outside?
-		//logutil.Logger(ctx).Warn("unable to find valid leader",
-		//	zap.Uint64("region", region.GetID()),
-		//	zap.Bool("epoch-stale", leaderEpochStale),
-		//	zap.Bool("unreachable", leaderUnreachable),
-		//	zap.Bool("exhausted", leaderExhausted),
-		//	zap.Bool("kv-timeout", leader.deadlineErrUsingConfTimeout),
-		//	zap.Bool("stale-read", s.staleRead))
-		// In stale-read, the request will fallback to leader after the local follower failure.
-		// If the leader is also unavailable, we can fallback to the follower and use replica-read flag again,
-		// The remote follower not tried yet, and the local follower can retry without stale-read flag.
-		// If leader tried and received deadline exceeded error, try follower.
+	if leaderInvalid {
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("exhausted").Inc()
-		selector.invalidateRegion()
+		if hasDeadlineExceededErr {
+			// when meet deadline exceeded error, do fast retry without invalidate region cache.
+			return nil
+		}
+		selector.invalidateRegion() // is exhausted, Is need to invalidate the region?
+		return nil
 	}
 	return leader
 }
@@ -143,7 +234,12 @@ func (s *ReplicaSelectMixedStrategy) calculateScore(r *Replica, idx, leaderIdx A
 		if s.preferLeader {
 			score += scoreOfPreferLeader
 		} else if s.tryLeader {
-			score += scoreOfNormalPeer
+			if len(s.labels) > 0 {
+				// when has match labels, prefer leader than not-matched peers.
+				score += scoreOfPreferLeader
+			} else {
+				score += scoreOfNormalPeer
+			}
 		}
 	} else {
 		if s.learnerOnly {
@@ -154,7 +250,6 @@ func (s *ReplicaSelectMixedStrategy) calculateScore(r *Replica, idx, leaderIdx A
 			score += scoreOfNormalPeer
 		}
 	}
-	// score = score + maxFollowerReplicaAttempt - r.attempts // must be score += 1 here.
 	if r.store.IsStoreMatch(s.stores) && r.store.IsLabelsMatch(s.labels) {
 		score += scoreOfLabelMatch
 	}
@@ -162,19 +257,6 @@ func (s *ReplicaSelectMixedStrategy) calculateScore(r *Replica, idx, leaderIdx A
 		score += scoreOfNotSlow
 	}
 	return score
-}
-
-func (s *ReplicaSelectMixedStrategy) IsLeaderExhausted(leader *Replica) bool {
-	// Allow another extra retry for the following case:
-	// 1. The stale read is enabled and leader peer is selected as the target peer at first.
-	// 2. Data is not ready is returned from the leader peer.
-	// 3. Stale read flag is removed and processing falls back to snapshot read on the leader peer.
-	// 4. The leader peer should be retried again using snapshot read.
-	if s.staleRead {
-		return leader.isExhausted(maxFollowerReplicaAttempt + 1)
-	} else {
-		return leader.isExhausted(maxFollowerReplicaAttempt)
-	}
 }
 
 func (r *Replica) isEpochStale() bool {
@@ -209,6 +291,7 @@ func (s *ReplicaSelector) buildRPCContext(bo *retry.Backoffer, r *Replica) (*RPC
 		return nil, nil
 	}
 	rpcCtx.Addr = addr
+	r.attempts++
 	return rpcCtx, nil
 }
 
@@ -222,11 +305,10 @@ func (s *ReplicaSelector) onSendFailure(bo *retry.Backoffer, ctx *RPCContext, er
 	switch s.endpointTp {
 	case tikvrpc.TiKV:
 		metrics.RegionCacheCounterWithSendFail.Inc()
-		replica := s.targetReplica()
-		if replica == nil {
+		if s.target == nil {
 			return
 		}
-		store := replica.store
+		store := s.target.store
 		if store.storeType != tikvrpc.TiKV {
 			return
 		}
