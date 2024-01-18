@@ -21,7 +21,7 @@ type Replica struct {
 	deadlineErrUsingConfTimeout bool
 }
 
-type ReplicaSelector struct {
+type ReplicaSelectorV2 struct {
 	endpointTp      tikvrpc.EndpointType
 	replicaReadType kv.ReplicaReadType
 	isStaleRead     bool
@@ -37,7 +37,7 @@ type ReplicaSelector struct {
 
 func newReplicaSelectorV2(
 	regionCache *RegionCache, regionID RegionVerID, req *tikvrpc.Request, et tikvrpc.EndpointType, opts ...StoreSelectorOption,
-) (*ReplicaSelector, error) {
+) (*ReplicaSelectorV2, error) {
 	cachedRegion := regionCache.GetCachedRegionWithRLock(regionID)
 	if cachedRegion == nil || !cachedRegion.isValid() {
 		return nil, errors.New("cached region invalid")
@@ -67,7 +67,7 @@ func newReplicaSelectorV2(
 		isReadOnlyReq = true
 	}
 
-	return &ReplicaSelector{
+	return &ReplicaSelectorV2{
 		et,
 		req.ReplicaReadType,
 		req.StaleRead,
@@ -81,7 +81,7 @@ func newReplicaSelectorV2(
 	}, nil
 }
 
-func (s *ReplicaSelector) next(bo *retry.Backoffer, req *tikvrpc.Request) (rpcCtx *RPCContext, err error) {
+func (s *ReplicaSelectorV2) next(bo *retry.Backoffer, req *tikvrpc.Request) (rpcCtx *RPCContext, err error) {
 	if !s.region.isValid() {
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("invalid").Inc()
 		return nil, nil
@@ -161,7 +161,7 @@ type ReplicaSelectMixedStrategy struct {
 	stores       []uint64
 }
 
-func (s *ReplicaSelectMixedStrategy) next(selector *ReplicaSelector, region *Region) *Replica {
+func (s *ReplicaSelectMixedStrategy) next(selector *ReplicaSelectorV2, region *Region) *Replica {
 	leaderIdx := region.getStore().workTiKVIdx
 	replicas := selector.replicas
 	maxScoreIdxes := make([]int, 0, len(replicas))
@@ -256,7 +256,7 @@ func (r *Replica) isExhausted(maxAttempt int) bool {
 	return r.attempts >= maxAttempt
 }
 
-func (s *ReplicaSelector) buildRPCContext(bo *retry.Backoffer, r *Replica) (*RPCContext, error) {
+func (s *ReplicaSelectorV2) buildRPCContext(bo *retry.Backoffer, r *Replica) (*RPCContext, error) {
 	if r.isEpochStale() {
 		metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("stale_store").Inc()
 		s.invalidateRegion()
@@ -283,13 +283,13 @@ func (s *ReplicaSelector) buildRPCContext(bo *retry.Backoffer, r *Replica) (*RPC
 	return rpcCtx, nil
 }
 
-func (s *ReplicaSelector) invalidateRegion() {
+func (s *ReplicaSelectorV2) invalidateRegion() {
 	if s.region != nil {
 		s.region.invalidate(Other)
 	}
 }
 
-func (s *ReplicaSelector) onSendFailure(bo *retry.Backoffer, ctx *RPCContext, err error) {
+func (s *ReplicaSelectorV2) onSendFailure(bo *retry.Backoffer, ctx *RPCContext, err error) {
 	switch s.endpointTp {
 	case tikvrpc.TiKV:
 		metrics.RegionCacheCounterWithSendFail.Inc()
@@ -309,7 +309,7 @@ func (s *ReplicaSelector) onSendFailure(bo *retry.Backoffer, ctx *RPCContext, er
 	}
 }
 
-func (s *ReplicaSelector) NeedReloadRegion(ctx *RPCContext) bool {
+func (s *ReplicaSelectorV2) NeedReloadRegion(ctx *RPCContext) bool {
 	// TODO:...
 	return true
 }
@@ -336,7 +336,7 @@ func (s *RegionRequestSender) onNotLeader(
 	}
 	return s.selector.onNotLeader(bo, ctx, notLeader)
 }
-func (s *ReplicaSelector) onNotLeader(bo *retry.Backoffer, ctx *RPCContext, notLeader *errorpb.NotLeader) (shouldRetry bool, err error) {
+func (s *ReplicaSelectorV2) onNotLeader(bo *retry.Backoffer, ctx *RPCContext, notLeader *errorpb.NotLeader) (shouldRetry bool, err error) {
 	switch s.endpointTp {
 	case tikvrpc.TiKV:
 		if notLeader.GetLeader() == nil {

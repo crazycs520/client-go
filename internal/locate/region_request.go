@@ -106,7 +106,7 @@ type RegionRequestSender struct {
 	storeAddr         string
 	rpcError          error
 	replicaSelector   *replicaSelector
-	selector          ReplicaSelector
+	selector          ReplicaSelectorV2
 	failStoreIDs      map[uint64]struct{}
 	failProxyStoreIDs map[uint64]struct{}
 	RegionRequestRuntimeStats
@@ -262,6 +262,11 @@ func (r *replica) isEpochStale() bool {
 
 func (r *replica) isExhausted(maxAttempt int) bool {
 	return r.attempts >= maxAttempt
+}
+
+type ReplicaSelector struct {
+	v1 *replicaSelector
+	v2 *ReplicaSelectorV2
 }
 
 type replicaSelector struct {
