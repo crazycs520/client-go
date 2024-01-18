@@ -33,7 +33,6 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorV2ByLeader() {
 			s.Equal(rpcCtx.Store.storeID, rc.GetLeaderStoreID())
 			s.Equal(selector.target.attempts, i)
 			s.Equal(selector.target.peer.Id, leader.peer.Id)
-			//rpcCtx.contextPatcher.applyTo(&req.Context)
 			s.Equal(req.StaleRead, false)
 			s.Equal(req.ReplicaRead, false)
 		} else if i <= 12 {
@@ -45,7 +44,6 @@ func (s *testRegionRequestToThreeStoresSuite) TestReplicaSelectorV2ByLeader() {
 			s.Equal(selector.target.attempts, 1)
 			s.NotEqual(selector.target.peer.Id, lastPeerId)
 			lastPeerId = selector.target.peer.Id
-			rpcCtx.contextPatcher.applyTo(&req.Context)
 			s.Equal(req.StaleRead, false) // stale read will always disable in follower.
 			s.Equal(req.ReplicaRead, false)
 		} else {

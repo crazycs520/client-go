@@ -146,7 +146,9 @@ type ReplicaSelectLeaderStrategy struct{}
 func (s *ReplicaSelectLeaderStrategy) next(replicas []*Replica, region *Region) *Replica {
 	leader := replicas[region.getStore().workTiKVIdx]
 	if leader.store.getLivenessState() == reachable && leader.attempts < maxReplicaAttempt {
-		return leader
+		if !leader.isEpochStale() { // check leader epoch here, if leader.epoch faild, we can try other replicas. instead of buildRPCContext faild and invalidate region then retry.
+			return leader
+		}
 	}
 	return nil
 }
