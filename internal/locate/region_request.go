@@ -785,6 +785,12 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 				}
 				return nil, stateChanged{}
 			}
+			for _, r := range selector.replicas {
+				if r.deadlineErrUsingConfTimeout {
+					// when meet deadline exceeded error, do fast retry without invalidate region cache.
+					return nil, nil
+				}
+			}
 			metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("exhausted").Inc()
 			selector.invalidateRegion()
 			return nil, nil
