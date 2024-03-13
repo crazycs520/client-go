@@ -567,7 +567,13 @@ func (c *batchCommandsClient) isStopped() bool {
 }
 
 func (c *batchCommandsClient) available() int64 {
-	return c.maxConcurrencyRequestLimit.Load() - c.sent.Load()
+	limit := c.maxConcurrencyRequestLimit.Load()
+	sent := c.sent.Load()
+	if sent > 0 {
+		return limit - sent
+	}
+	// Just guessing, there may be the `sent` will be less than zero.
+	return limit
 }
 
 func (c *batchCommandsClient) send(forwardedHost string, req *tikvpb.BatchCommandsRequest) {
