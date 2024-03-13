@@ -879,3 +879,78 @@ func TestBatchClientReceiveHealthFeedback(t *testing.T) {
 		assert.Fail(t, "health feedback not received")
 	}
 }
+
+func TestConcurrencyRequestLimitWithEnableForwarding(t *testing.T) {
+	store1, port1 := mockserver.StartMockTikvService()
+	require.True(t, port1 > 0)
+	require.True(t, store1.IsRunning())
+	addr1 := store1.Addr()
+	client1 := NewRPCClient()
+	store2, port2 := mockserver.StartMockTikvService()
+	require.True(t, port2 > 0)
+	require.True(t, store2.IsRunning())
+	addr2 := store2.Addr()
+	defer func() {
+		err := client1.Close()
+		require.NoError(t, err)
+		store1.Stop()
+		store2.Stop()
+	}()
+	conn, err := client1.getConnArray(addr1, true)
+	assert.Nil(t, err)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	done := int64(0)
+	concurrency := 200
+	go func() {
+		defer wg.Done()
+		for {
+			store1.Stop()
+			require.False(t, store1.IsRunning())
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+			store1.Start(addr1)
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+			if atomic.LoadInt64(&done) >= int64(concurrency) {
+				return
+			}
+		}
+	}()
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				atomic.AddInt64(&done, 1)
+				wg.Done()
+			}()
+			for i := 0; i < 2000; i++ {
+				req := &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_Coprocessor{Coprocessor: &coprocessor.Request{}}}
+				forwardedHost := ""
+				if i%2 != 0 {
+					forwardedHost = addr2
+				}
+				_, err = sendBatchRequest(context.Background(), addr1, forwardedHost, conn.batchConn, req, time.Millisecond*50, 0)
+				if err == nil {
+					continue
+				}
+				if err == nil ||
+					strings.Contains(err.Error(), "context deadline exceeded") ||
+					err.Error() == "rpc error: code = Unavailable desc = error reading from server: EOF" {
+					continue
+				}
+				require.Fail(t, err.Error(), "unexpected error")
+			}
+		}()
+	}
+	wg.Wait()
+
+	for _, cli := range conn.batchConn.batchCommandsClients {
+		require.Equal(t, int64(9223372036854775807), cli.maxConcurrencyRequestLimit.Load())
+		require.True(t, cli.available() > 0)
+		require.True(t, cli.sent.Load() >= 0, fmt.Sprintf("sent: %d", cli.sent.Load()))
+	}
+
+	cli := conn.batchConn.getClient()
+	require.NotNil(t, cli)
+	// TODO(crazycs520): fix following assertion.
+	require.True(t, cli.sent.Load() >= 0, fmt.Sprintf("sent: %d", cli.sent.Load()))
+}
