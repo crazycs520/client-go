@@ -572,7 +572,7 @@ func (c *batchCommandsClient) available() int64 {
 	if sent > 0 {
 		return limit - sent
 	}
-	// Just guessing, there may be the `sent` will be less than zero.
+	// Just guessing, the `sent` may be less than zero in some case.
 	return limit
 }
 
