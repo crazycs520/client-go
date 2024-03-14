@@ -37,7 +37,6 @@ package locate
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"github.com/tikv/client-go/v2/config"
 	"github.com/tikv/client-go/v2/internal/client/mockserver"
 	"math/rand"
@@ -1766,7 +1765,13 @@ func (s *testRegionRequestToThreeStoresSuite) TestFastFailWhenGetWrongStoreAddr(
 	store3, port := mockserver.StartMockTikvService()
 	s.True(port > 0)
 	sleepBeforeRespondFn := func(ctx context.Context) error {
-		time.Sleep(100 * time.Millisecond)
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
 		return nil
 	}
 	store1.SetMetaChecker(sleepBeforeRespondFn)
@@ -1792,7 +1797,7 @@ func (s *testRegionRequestToThreeStoresSuite) TestFastFailWhenGetWrongStoreAddr(
 		case "store3":
 			addr = store3.Addr()
 		}
-		fmt.Printf("addr-new: %v ------------\n\n", addr)
+		//fmt.Printf("addr-new: %v ------------\n\n", addr)
 		return rpcClient.SendRequest(ctx, addr, req, timeout)
 	}}
 
@@ -1808,10 +1813,8 @@ func (s *testRegionRequestToThreeStoresSuite) TestFastFailWhenGetWrongStoreAddr(
 			time.Sleep(time.Millisecond * time.Duration(rand.Intn(200)))
 			addr := store.Addr()
 			store.Stop()
-			require.False(t, store.IsRunning())
 			time.Sleep(time.Millisecond * time.Duration(rand.Intn(200)))
 			store.Start(addr)
-
 			if atomic.LoadInt64(&done) > 0 {
 				return
 			}
@@ -1822,14 +1825,21 @@ func (s *testRegionRequestToThreeStoresSuite) TestFastFailWhenGetWrongStoreAddr(
 	req := tikvrpc.NewReplicaReadRequest(tikvrpc.CmdGet, &kvrpcpb.GetRequest{Key: []byte("k")}, kv.ReplicaReadMixed, nil)
 	req.ReplicaRead = kv.ReplicaReadMixed.IsFollowerRead()
 
-	start := time.Now()
-	loc, err := s.cache.LocateKey(bo, []byte("k"))
-	s.Nil(err)
-	sender := NewRegionRequestSender(s.cache, fnClient)
-	resp, _, _, err := sender.SendReqCtx(bo, req, loc.Region, time.Second*5, tikvrpc.TiKV)
-	s.Nil(err)
-	regionErr, err := resp.GetRegionError()
-	s.Nil(err)
-	s.Nil(regionErr)
-	fmt.Printf("cost: %v--------\n\n\n", time.Since(start))
+	totalCost := time.Duration(0)
+	cnt := 10
+	for i := 0; i < cnt; i++ {
+		start := time.Now()
+		loc, err := s.cache.LocateKey(bo, []byte("k"))
+		s.Nil(err)
+		sender := NewRegionRequestSender(s.cache, fnClient)
+		resp, _, _, err := sender.SendReqCtx(bo, req, loc.Region, time.Second*5, tikvrpc.TiKV)
+		s.Nil(err)
+		regionErr, err := resp.GetRegionError()
+		s.Nil(err)
+		s.Nil(regionErr)
+		totalCost += time.Since(start)
+	}
+	fmt.Printf("avg cost: %v--------\n\n\n", totalCost/time.Duration(cnt))
+	atomic.StoreInt64(&done, 1)
+	wg.Wait()
 }

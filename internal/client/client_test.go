@@ -879,3 +879,99 @@ func TestBatchClientReceiveHealthFeedback(t *testing.T) {
 		assert.Fail(t, "health feedback not received")
 	}
 }
+
+func TestFastFailWhenGetWrongStoreAddr(t *testing.T) {
+	config.UpdateGlobal(func(conf *config.Config) {
+		// enable batch-client.
+		conf.TiKVClient.MaxBatchSize = 128
+	})()
+
+	store1, port := mockserver.StartMockTikvService()
+	require.True(t, port > 0)
+	store2, port := mockserver.StartMockTikvService()
+	require.True(t, port > 0)
+	sleepBeforeRespondFn := func(ctx context.Context) error {
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
+		return nil
+	}
+	store1.SetMetaChecker(sleepBeforeRespondFn)
+	store2.SetMetaChecker(sleepBeforeRespondFn)
+
+	rpcClient := NewRPCClient()
+	defer func() {
+		rpcClient.Close()
+		store1.Stop()
+		store2.Stop()
+
+	}()
+
+	var wg sync.WaitGroup
+	concurrency := 10
+	done := int64(0)
+	totalCost := int64(time.Duration(0))
+	cnt := 5
+	sendSomeRequest := func(timeout time.Duration, cnt int) {
+		for i := 0; i < cnt; i++ {
+			start := time.Now()
+			req := &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_Coprocessor{Coprocessor: &coprocessor.Request{}}}
+			// try store1 first.
+			conn, err := rpcClient.getConnArray(store1.Addr(), true)
+			require.Nil(t, err)
+			_, err = sendBatchRequest(context.Background(), store1.Addr(), "", conn.batchConn, req, timeout, 0)
+			if err != nil {
+				// retry store2
+				conn, err = rpcClient.getConnArray(store2.Addr(), true)
+				require.Nil(t, err)
+				_, err = sendBatchRequest(context.Background(), store2.Addr(), "", conn.batchConn, req, timeout, 0)
+				require.Nil(t, err)
+			}
+			atomic.AddInt64(&totalCost, int64(time.Since(start)))
+			//if j%100 == 0 {
+			fmt.Printf("--------%v    %v --------\n\n", i, time.Since(start))
+			//}
+		}
+	}
+	sendSomeRequest(time.Second, 5)
+	store1.Stop()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			// intermittent stop and start store1.
+			addr := store1.Addr()
+			store1.Stop()
+			time.Sleep(time.Second)
+			store1.Start(addr)
+			require.True(t, store1.IsRunning())
+			time.Sleep(time.Second)
+
+			if atomic.LoadInt64(&done) >= int64(concurrency) {
+				return
+			}
+		}
+	}()
+
+	for j := 0; j < concurrency; j++ {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				wg.Done()
+				atomic.StoreInt64(&done, 1)
+			}()
+			if j == 0 {
+				sendSomeRequest(time.Second, 50)
+			} else {
+				sendSomeRequest(time.Second*10, 5)
+			}
+		}()
+	}
+	wg.Wait()
+	fmt.Printf("avg cost: %v--------\n\n\n", time.Duration(totalCost/int64(concurrency*cnt)))
+}

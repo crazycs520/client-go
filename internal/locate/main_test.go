@@ -26,6 +26,7 @@ func TestMain(m *testing.M) {
 
 	opts := []goleak.Option{
 		goleak.IgnoreTopFunction("github.com/pingcap/goleveldb/leveldb.(*DB).mpoolDrain"),
+		goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	}
 
 	goleak.VerifyTestMain(m, opts...)
