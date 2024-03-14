@@ -37,6 +37,10 @@ package locate
 import (
 	"context"
 	"fmt"
+	"github.com/stretchr/testify/require"
+	"github.com/tikv/client-go/v2/config"
+	"github.com/tikv/client-go/v2/internal/client/mockserver"
+	"math/rand"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1747,4 +1751,85 @@ func (s *testRegionRequestToThreeStoresSuite) TestTiKVRecoveredFromDown() {
 		}
 	}
 	s.Require().Fail("should access recovered peer after region reloading within RegionCacheTTL")
+}
+
+func (s *testRegionRequestToThreeStoresSuite) TestFastFailWhenGetWrongStoreAddr() {
+	config.UpdateGlobal(func(conf *config.Config) {
+		// enable batch-client.
+		conf.TiKVClient.MaxBatchSize = 128
+	})()
+
+	store1, port := mockserver.StartMockTikvService()
+	s.True(port > 0)
+	store2, port := mockserver.StartMockTikvService()
+	s.True(port > 0)
+	store3, port := mockserver.StartMockTikvService()
+	s.True(port > 0)
+	sleepBeforeRespondFn := func(ctx context.Context) error {
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	}
+	store1.SetMetaChecker(sleepBeforeRespondFn)
+	store2.SetMetaChecker(sleepBeforeRespondFn)
+	store3.SetMetaChecker(sleepBeforeRespondFn)
+
+	rpcClient := client.NewRPCClient()
+	defer func() {
+		rpcClient.Close()
+		store1.Stop()
+		store2.Stop()
+		store3.Stop()
+
+	}()
+
+	fnClient := &fnClient{fn: func(ctx context.Context, addr string, req *tikvrpc.Request, timeout time.Duration) (response *tikvrpc.Response, err error) {
+		fmt.Printf("addr: %v ------------\n\n", addr)
+		switch addr {
+		case "store1":
+			addr = store1.Addr()
+		case "store2":
+			addr = store2.Addr()
+		case "store3":
+			addr = store3.Addr()
+		}
+		fmt.Printf("addr-new: %v ------------\n\n", addr)
+		return rpcClient.SendRequest(ctx, addr, req, timeout)
+	}}
+
+	var wg sync.WaitGroup
+	done := int64(0)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stores := []*mockserver.MockServer{store1, store2, store3}
+		for {
+			// intermittent stop and start store1 or store2 or store3.
+			store := stores[rand.Intn(len(stores))]
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(200)))
+			addr := store.Addr()
+			store.Stop()
+			require.False(t, store.IsRunning())
+			time.Sleep(time.Millisecond * time.Duration(rand.Intn(200)))
+			store.Start(addr)
+
+			if atomic.LoadInt64(&done) > 0 {
+				return
+			}
+		}
+	}()
+
+	bo := retry.NewBackoffer(context.Background(), -1)
+	req := tikvrpc.NewReplicaReadRequest(tikvrpc.CmdGet, &kvrpcpb.GetRequest{Key: []byte("k")}, kv.ReplicaReadMixed, nil)
+	req.ReplicaRead = kv.ReplicaReadMixed.IsFollowerRead()
+
+	start := time.Now()
+	loc, err := s.cache.LocateKey(bo, []byte("k"))
+	s.Nil(err)
+	sender := NewRegionRequestSender(s.cache, fnClient)
+	resp, _, _, err := sender.SendReqCtx(bo, req, loc.Region, time.Second*5, tikvrpc.TiKV)
+	s.Nil(err)
+	regionErr, err := resp.GetRegionError()
+	s.Nil(err)
+	s.Nil(regionErr)
+	fmt.Printf("cost: %v--------\n\n\n", time.Since(start))
 }
