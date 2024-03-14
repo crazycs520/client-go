@@ -1200,11 +1200,6 @@ func (s *baseReplicaSelector) buildRPCContext(bo *retry.Backoffer, targetReplica
 	if len(addr) == 0 {
 		return nil, nil
 	}
-	if val, err := util.EvalFailpoint("injectWrongStoreAddr2"); err == nil {
-		if a, ok := val.(string); ok && len(a) > 0 {
-			addr = a
-		}
-	}
 	rpcCtx.Addr = addr
 	targetReplica.attempts++
 
