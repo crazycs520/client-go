@@ -1306,7 +1306,10 @@ func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey 
 		// just retry once, it won't bring much overhead.
 		if stale {
 			logutil.BgLogger().Info("get stale region, just retry once",
-				zap.Uint64("region", r.GetID()), zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()), zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()))
+				zap.Uint64("region", r.GetID()), zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+				zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+				zap.String("start-key", fmt.Sprintf("%X", r.StartKey())),
+				zap.String("end-key", fmt.Sprintf("%X", r.EndKey())))
 			observeLoadRegion(tag+":Retry", r, expired, 0)
 			lr, err = c.loadRegion(bo, key, isEndKey)
 			if err != nil {
@@ -1691,6 +1694,8 @@ func (mu *regionIndexMu) insertRegionToCache(cachedRegion *Region, invalidateOld
 	if ok && (oldVer.GetVer() > newVer.GetVer() || oldVer.GetConfVer() > newVer.GetConfVer()) {
 		logutil.BgLogger().Info("get stale region",
 			zap.Uint64("region", newVer.GetID()), zap.Uint64("new-ver", newVer.GetVer()), zap.Uint64("new-conf", newVer.GetConfVer()),
+			zap.String("start-key", fmt.Sprintf("%X", cachedRegion.StartKey())),
+			zap.String("end-key", fmt.Sprintf("%X", cachedRegion.EndKey())),
 			zap.Uint64("old-ver", oldVer.GetVer()), zap.Uint64("old-conf", oldVer.GetConfVer()))
 		return false
 	}

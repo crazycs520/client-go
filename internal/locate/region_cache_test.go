@@ -1191,15 +1191,18 @@ func (s *testRegionCacheSuite) TestSplit() {
 	// tikv-server reports `NotInRegion`
 	s.cache.InvalidateCachedRegion(r.VerID())
 	s.checkCache(0)
+	fmt.Printf("-----------\n\n")
 
 	r = s.getRegion([]byte("x"))
 	s.Equal(r.GetID(), region2)
+	s.Equal(uint64(1), r.meta.GetRegionEpoch().GetVersion())
 	s.Equal(s.getAddr([]byte("x"), kv.ReplicaReadLeader, 0), s.storeAddr(s.store1))
 	s.Equal(s.getAddr([]byte("x"), kv.ReplicaReadFollower, seed), s.storeAddr(s.store2))
 	s.checkCache(1)
 
 	r = s.getRegionWithEndKey([]byte("m"))
 	s.Equal(r.GetID(), s.region1)
+	s.Equal(uint64(1), r.meta.GetRegionEpoch().GetVersion())
 	s.checkCache(2)
 }
 
