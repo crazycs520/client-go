@@ -2252,6 +2252,12 @@ func (c *RegionCache) OnRegionEpochNotMatch(bo *retry.Backoffer, ctx *RPCContext
 
 	c.mu.Lock()
 	for _, region := range newRegions {
+		logutil.Logger(bo.GetCtx()).Info("OnRegionEpochNotMatch insert new region into cache",
+			zap.Uint64("region", region.meta.GetId()),
+			zap.Uint64("ver", region.meta.GetRegionEpoch().GetVersion()),
+			zap.Uint64("con-ver", region.meta.GetRegionEpoch().GetConfVer()),
+			zap.String("start-key", fmt.Sprintf("%X", region.StartKey())),
+			zap.String("end-key", fmt.Sprintf("%X", region.EndKey())))
 		c.insertRegionToCache(region, true, true)
 	}
 	c.mu.Unlock()

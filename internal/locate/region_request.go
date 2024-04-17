@@ -1653,6 +1653,8 @@ func (s *RegionRequestSender) SendReqCtx(
 			regionErrLogging := regionErrorToLogging(rpcCtx.Peer.GetId(), regionErr)
 			totalErrors[regionErrLogging]++
 			retry, err = s.onRegionError(bo, rpcCtx, req, regionErr)
+			msg := fmt.Sprintf("send request got region error: %v", regionErr.String())
+			s.logSendReqError(bo, msg, regionID, retryTimes, req, totalErrors)
 			if err != nil {
 				msg := fmt.Sprintf("send request on region error failed, err: %v", err.Error())
 				s.logSendReqError(bo, msg, regionID, retryTimes, req, totalErrors)
@@ -2258,9 +2260,10 @@ func (s *RegionRequestSender) onRegionError(
 	}
 
 	if epochNotMatch := regionErr.GetEpochNotMatch(); epochNotMatch != nil {
-		logutil.Logger(bo.GetCtx()).Debug(
+		logutil.Logger(bo.GetCtx()).Info(
 			"tikv reports `EpochNotMatch` retry later",
 			zap.Stringer("EpochNotMatch", epochNotMatch),
+			zap.Any("current-regions", epochNotMatch.CurrentRegions),
 			zap.Stringer("ctx", ctx),
 		)
 		retry, err := s.regionCache.OnRegionEpochNotMatch(bo, ctx, epochNotMatch.CurrentRegions)
