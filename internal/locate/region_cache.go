@@ -1202,6 +1202,14 @@ func (c *RegionCache) LocateKeyRange(bo *retry.Backoffer, startKey, endKey []byt
 			if r == nil {
 				break
 			}
+			logutil.Logger(bo.GetCtx()).Info("region cache, locate key range from cache",
+				zap.String("key", fmt.Sprintf("%X", startKey)),
+				zap.Uint64("region", r.GetID()),
+				zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+				zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+				zap.String("region-start-key", fmt.Sprintf("%X", r.StartKey())),
+				zap.String("region-end-key", fmt.Sprintf("%X", r.EndKey())))
+
 			res = append(res, &KeyLocation{
 				Region:   r.VerID(),
 				StartKey: r.StartKey(),
@@ -1224,6 +1232,15 @@ func (c *RegionCache) LocateKeyRange(bo *retry.Backoffer, startKey, endKey []byt
 			return nil, err
 		}
 		for _, r := range batchRegions {
+			logutil.Logger(bo.GetCtx()).Info("region cache, locate key range batch load region from pd",
+				zap.String("key", fmt.Sprintf("%X", startKey)),
+				zap.String("end-key", fmt.Sprintf("%X", endKey)),
+				zap.Uint64("region", r.GetID()),
+				zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+				zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+				zap.String("region-start-key", fmt.Sprintf("%X", r.StartKey())),
+				zap.String("region-end-key", fmt.Sprintf("%X", r.EndKey())))
+
 			res = append(res, &KeyLocation{
 				Region:   r.VerID(),
 				StartKey: r.StartKey(),
@@ -1246,6 +1263,14 @@ func (c *RegionCache) LocateKey(bo *retry.Backoffer, key []byte) (*KeyLocation, 
 	if err != nil {
 		return nil, err
 	}
+	logutil.Logger(bo.GetCtx()).Info("region cache, locate key",
+		zap.String("key", fmt.Sprintf("%X", key)),
+		zap.Uint64("region", r.GetID()),
+		zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+		zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+		zap.String("start-key", fmt.Sprintf("%X", r.StartKey())),
+		zap.String("end-key", fmt.Sprintf("%X", r.EndKey())))
+
 	return &KeyLocation{
 		Region:   r.VerID(),
 		StartKey: r.StartKey(),
@@ -1275,6 +1300,14 @@ func (c *RegionCache) LocateEndKey(bo *retry.Backoffer, key []byte) (*KeyLocatio
 	if err != nil {
 		return nil, err
 	}
+	logutil.Logger(bo.GetCtx()).Info("region cache, locate end key",
+		zap.String("key", fmt.Sprintf("%X", key)),
+		zap.Uint64("region", r.GetID()),
+		zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+		zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+		zap.String("start-key", fmt.Sprintf("%X", r.StartKey())),
+		zap.String("end-key", fmt.Sprintf("%X", r.EndKey())))
+
 	return &KeyLocation{
 		Region:   r.VerID(),
 		StartKey: r.StartKey(),
@@ -1318,8 +1351,14 @@ func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey 
 			}
 			r = lr
 			c.mu.Lock()
-			c.insertRegionToCache(r, true, true)
+			stale2 := c.insertRegionToCache(r, true, true)
 			c.mu.Unlock()
+			logutil.BgLogger().Info("get stale region, retry once result",
+				zap.Uint64("region", r.GetID()), zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()),
+				zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()),
+				zap.String("start-key", fmt.Sprintf("%X", r.StartKey())),
+				zap.String("end-key", fmt.Sprintf("%X", r.EndKey())),
+				zap.Bool("stale", stale2))
 		}
 	} else if flags := r.resetSyncFlags(needReloadOnAccess | needDelayedReloadReady); flags > 0 {
 		// load region when it be marked as need reload.
