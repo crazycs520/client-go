@@ -1305,6 +1305,8 @@ func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey 
 		c.mu.Unlock()
 		// just retry once, it won't bring much overhead.
 		if stale {
+			logutil.BgLogger().Info("get stale region, just retry once",
+				zap.Uint64("region", r.GetID()), zap.Uint64("ver", r.meta.GetRegionEpoch().GetVersion()), zap.Uint64("new-conf", r.meta.GetRegionEpoch().GetConfVer()))
 			observeLoadRegion(tag+":Retry", r, expired, 0)
 			lr, err = c.loadRegion(bo, key, isEndKey)
 			if err != nil {
@@ -1663,6 +1665,9 @@ func (c *RegionCache) UpdateLeader(regionID RegionVerID, leader *metapb.Peer, cu
 // removeVersionFromCache removes a RegionVerID from cache, tries to cleanup
 // both c.mu.regions and c.mu.versions. Note this function is not thread-safe.
 func (mu *regionIndexMu) removeVersionFromCache(oldVer RegionVerID, regionID uint64) {
+	logutil.BgLogger().Info("region cache delete old region",
+		zap.String("region-ver", oldVer.String()),
+		zap.Uint64("region-id", regionID))
 	delete(mu.regions, oldVer)
 	if ver, ok := mu.latestVersions[regionID]; ok && ver.Equals(oldVer) {
 		delete(mu.latestVersions, regionID)
@@ -1684,7 +1689,7 @@ func (mu *regionIndexMu) insertRegionToCache(cachedRegion *Region, invalidateOld
 	// and there is the synchronization time between the pd follower and the leader.
 	// So we should check the epoch.
 	if ok && (oldVer.GetVer() > newVer.GetVer() || oldVer.GetConfVer() > newVer.GetConfVer()) {
-		logutil.BgLogger().Debug("get stale region",
+		logutil.BgLogger().Info("get stale region",
 			zap.Uint64("region", newVer.GetID()), zap.Uint64("new-ver", newVer.GetVer()), zap.Uint64("new-conf", newVer.GetConfVer()),
 			zap.Uint64("old-ver", oldVer.GetVer()), zap.Uint64("old-conf", oldVer.GetConfVer()))
 		return false
@@ -1730,6 +1735,13 @@ func (mu *regionIndexMu) insertRegionToCache(cachedRegion *Region, invalidateOld
 		}
 	}
 	// update related vars.
+	logutil.BgLogger().Info("region cache insert region",
+		zap.Uint64("region", cachedRegion.meta.GetId()),
+		zap.String("region-ver-id", newVer.String()),
+		zap.Uint64("ver", cachedRegion.meta.GetRegionEpoch().GetVersion()),
+		zap.Uint64("con-ver", cachedRegion.meta.GetRegionEpoch().GetConfVer()),
+		zap.String("start-key", fmt.Sprintf("%X", cachedRegion.StartKey())),
+		zap.String("end-key", fmt.Sprintf("%X", cachedRegion.EndKey())))
 	mu.regions[newVer] = cachedRegion
 	mu.latestVersions[newVer.id] = newVer
 	return true

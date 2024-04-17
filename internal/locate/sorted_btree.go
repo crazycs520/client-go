@@ -36,6 +36,7 @@ package locate
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/google/btree"
 	"github.com/tikv/client-go/v2/internal/logutil"
@@ -58,8 +59,23 @@ func NewSortedRegions(btreeDegree int) *SortedRegions {
 func (s *SortedRegions) ReplaceOrInsert(cachedRegion *Region) *Region {
 	old, _ := s.b.ReplaceOrInsert(newBtreeItem(cachedRegion))
 	if old != nil {
+		logutil.BgLogger().Info("region cache replace region in b-tree",
+			zap.Uint64("region", cachedRegion.meta.GetId()),
+			zap.Uint64("ver", cachedRegion.meta.GetRegionEpoch().GetVersion()),
+			zap.Uint64("con-ver", cachedRegion.meta.GetRegionEpoch().GetConfVer()),
+			zap.String("start-key", fmt.Sprintf("%X", cachedRegion.StartKey())),
+			zap.String("end-key", fmt.Sprintf("%X", cachedRegion.EndKey())),
+			zap.Uint64("old-region", old.cachedRegion.meta.GetId()),
+			zap.Uint64("old-region-ver", old.cachedRegion.meta.GetRegionEpoch().GetVersion()),
+			zap.Uint64("old-region-con-ver", old.cachedRegion.meta.GetRegionEpoch().GetConfVer()))
 		return old.cachedRegion
 	}
+	logutil.BgLogger().Info("region cache insert region in b-tree",
+		zap.Uint64("region", cachedRegion.meta.GetId()),
+		zap.Uint64("ver", cachedRegion.meta.GetRegionEpoch().GetVersion()),
+		zap.Uint64("con-ver", cachedRegion.meta.GetRegionEpoch().GetConfVer()),
+		zap.String("start-key", fmt.Sprintf("%X", cachedRegion.StartKey())),
+		zap.String("end-key", fmt.Sprintf("%X", cachedRegion.EndKey())))
 	return nil
 }
 
@@ -101,8 +117,9 @@ func (s *SortedRegions) removeIntersecting(r *Region, verID RegionVerID) ([]*btr
 			return false
 		}
 		if item.cachedRegion.meta.GetRegionEpoch().GetVersion() > verID.ver {
-			logutil.BgLogger().Debug("get stale region",
+			logutil.BgLogger().Info("get stale region",
 				zap.Uint64("region", verID.GetID()), zap.Uint64("ver", verID.GetVer()), zap.Uint64("conf", verID.GetConfVer()),
+				zap.Uint64("intersecting-region", item.cachedRegion.meta.GetId()),
 				zap.Uint64("intersecting-ver", item.cachedRegion.meta.GetRegionEpoch().GetVersion()))
 			stale = true
 			return false
@@ -115,6 +132,12 @@ func (s *SortedRegions) removeIntersecting(r *Region, verID RegionVerID) ([]*btr
 	}
 	for _, item := range deleted {
 		s.b.Delete(item)
+		logutil.BgLogger().Info("region cache delete region in b-tree",
+			zap.Uint64("region", item.cachedRegion.meta.GetId()),
+			zap.Uint64("ver", item.cachedRegion.meta.GetRegionEpoch().GetVersion()),
+			zap.Uint64("con-ver", item.cachedRegion.meta.GetRegionEpoch().GetConfVer()),
+			zap.String("start-key", fmt.Sprintf("%X", item.cachedRegion.StartKey())),
+			zap.String("end-key", fmt.Sprintf("%X", item.cachedRegion.EndKey())))
 	}
 	return deleted, false
 }

@@ -35,6 +35,7 @@
 package util
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -100,4 +101,10 @@ func TestTimeDetail(t *testing.T) {
 		TotalRPCWallTime: time.Millisecond * 6,
 	}
 	assert.Equal(t, "time_detail: {total_process_time: 2ms, total_suspend_time: 3ms, total_wait_time: 4ms, total_kv_read_wall_time: 5ms, tikv_wall_time: 6ms}", detail.String())
+}
+
+func TestDebugLog(t *testing.T) {
+	b := []byte("t_r_i_r")
+	str := fmt.Sprintf("%X", b)
+	fmt.Printf("%s  \n", str)
 }
