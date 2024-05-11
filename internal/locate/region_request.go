@@ -1853,6 +1853,9 @@ func (s *RegionRequestSender) SendReqCtx(
 		if staleReadCollector != nil {
 			staleReadCollector.onResp(req.Type, resp, isLocalTraffic)
 		}
+		if cost := time.Since(startTime); cost > slowLogSendReqTime || cost > timeout {
+			s.logSendReqError(bo, "send req too slow", regionID, retryTimes, req, cost, bo.GetTotalSleep()-startBackOff, timeout)
+		}
 		return resp, rpcCtx, retryTimes, nil
 	}
 }
