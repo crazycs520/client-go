@@ -418,6 +418,7 @@ func (a *batchConn) getClientAndSend() {
 	if cli == nil {
 		logutil.BgLogger().Info("no available connections", zap.String("target", target), zap.Any("reasons", reasons))
 		metrics.TiKVNoAvailableConnectionCounter.Inc()
+		a.reqBuilder.cancel(errors.New("no available connections"))
 		return
 	}
 	defer cli.unlockForSend()
