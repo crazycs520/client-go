@@ -173,9 +173,20 @@ func (b *batchCommandsBuilder) buildWithLimit(limit int64, collect func(id uint6
 // cancel all requests, only used in test.
 func (b *batchCommandsBuilder) cancel(e error) {
 	for _, entry := range b.entries.all() {
-		entry.(*batchCommandsEntry).error(e)
+		if cmd, ok := entry.(*batchCommandsEntry); ok {
+			ts := uint64(0)
+			if get := cmd.req.GetGet(); get != nil {
+				ts = get.Version
+			} else if batchGet := cmd.req.GetBatchGet(); batchGet != nil {
+				ts = batchGet.Version
+			} else if cop := cmd.req.GetCoprocessor(); cop != nil {
+				ts = cop.StartTs
+			}
+			logutil.BgLogger().Info("need to cancel cmd?", zap.Uint64("ts", ts), zap.String("reasons", e.Error()))
+		}
+		//entry.(*batchCommandsEntry).error(e)
 	}
-	b.entries.reset()
+	//b.entries.reset()
 }
 
 // reset resets the builder to the initial state.
