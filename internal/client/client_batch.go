@@ -418,7 +418,12 @@ func (a *batchConn) getClientAndSend() {
 	if cli == nil {
 		logutil.BgLogger().Info("no available connections", zap.String("target", target), zap.Any("reasons", reasons))
 		metrics.TiKVNoAvailableConnectionCounter.Inc()
-		a.reqBuilder.cancel(errors.New("no available connections"))
+		if config.GetGlobalConfig().TiKVClient.MaxConcurrencyRequestLimit == config.DefMaxConcurrencyRequestLimit {
+			// Only cancel request when MaxConcurrencyRequestLimit feature is not enabled, for compatible with the behavior of older versions.
+			// TODO: But when MaxConcurrencyRequestLimit feature is enable, the request won't be canceled and will wait timeout,
+			// this behavior may not be reasonable, the timeout is usually 40s or 60s, which is too long to retry in time.
+			a.reqBuilder.cancel(errors.New("no available connections"))
+		}
 		return
 	}
 	defer cli.unlockForSend()

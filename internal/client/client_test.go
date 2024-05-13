@@ -128,9 +128,15 @@ func TestCancelTimeoutRetErr(t *testing.T) {
 func TestSendWhenReconnect(t *testing.T) {
 	server, port := mockserver.StartMockTikvService()
 	require.True(t, port > 0)
+	restoreFn := config.UpdateGlobal(func(conf *config.Config) {
+		conf.TiKVClient.MaxConcurrencyRequestLimit = 10000
+	})
 
 	rpcClient := NewRPCClient()
-	defer rpcClient.Close()
+	defer func() {
+		rpcClient.Close()
+		restoreFn()
+	}()
 	addr := server.Addr()
 	conn, err := rpcClient.getConnArray(addr, true)
 	assert.Nil(t, err)
@@ -142,7 +148,7 @@ func TestSendWhenReconnect(t *testing.T) {
 
 	req := tikvrpc.NewRequest(tikvrpc.CmdEmpty, &tikvpb.BatchCommandsEmptyRequest{})
 	_, err = rpcClient.SendRequest(context.Background(), addr, req, 5*time.Second)
-	assert.True(t, strings.Contains(err.Error(), "timeout"))
+	require.Regexp(t, "wait recvLoop timeout,timeout:5s, wait_duration:.* context deadline exceeded", err.Error())
 	server.Stop()
 }
 
@@ -950,6 +956,7 @@ func TestRandomRestartStoreAndForwarding(t *testing.T) {
 					err.Error() == "rpc error: code = Unavailable desc = error reading from server: EOF" ||
 					strings.Contains(err.Error(), "context deadline exceeded") ||
 					strings.Contains(err.Error(), "connect: connection refused") ||
+					strings.Contains(err.Error(), "no available connections") ||
 					strings.Contains(err.Error(), "rpc error: code = Unavailable desc = error reading from server") {
 					continue
 				}
