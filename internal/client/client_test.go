@@ -1010,3 +1010,33 @@ func TestErrConn(t *testing.T) {
 	assert.True(t, errors.As(err1, &errMsg))
 	assert.EqualError(t, err1, errMsg.Error())
 }
+
+func TestFastFailWhenNoAvailableConn(t *testing.T) {
+	server, port := mockserver.StartMockTikvService()
+	require.True(t, port > 0)
+	require.True(t, server.IsRunning())
+	addr := server.Addr()
+	client := NewRPCClient()
+	defer func() {
+		err := client.Close()
+		require.NoError(t, err)
+		server.Stop()
+	}()
+
+	req := &tikvpb.BatchCommandsRequest_Request{Cmd: &tikvpb.BatchCommandsRequest_Request_Coprocessor{Coprocessor: &coprocessor.Request{}}}
+	conn, err := client.getConnArray(addr, true)
+	assert.Nil(t, err)
+	_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, time.Second, 0)
+	require.NoError(t, err)
+
+	for _, c := range conn.batchConn.batchCommandsClients {
+		// mock all client a in recreate.
+		c.lockForRecreate()
+	}
+	start := time.Now()
+	timeout := time.Second
+	_, err = sendBatchRequest(context.Background(), addr, "", conn.batchConn, req, timeout, 0)
+	require.Error(t, err)
+	require.Equal(t, "no available connections", err.Error())
+	require.Less(t, time.Since(start), timeout)
+}
