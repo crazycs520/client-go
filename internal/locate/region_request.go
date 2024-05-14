@@ -1752,7 +1752,8 @@ func (s *RegionRequestSender) SendReqCtx(
 				if err := s.replicaSelector.getBaseReplicaSelector().backoffOnNoCandidate(bo); err != nil {
 					return nil, nil, retryTimes, err
 				}
-				if cost := time.Since(startTime); cost > slowLogSendReqTime || cost > timeout {
+				if cost := time.Since(startTime); cost > slowLogSendReqTime || cost > timeout ||
+					(time.Duration(bo.GetTotalSleep()*int(time.Millisecond))+cost) > time.Second {
 					s.logSendReqError(bo, "throwing pseudo region error due to no replica available", regionID, retryTimes, req, cost, bo.GetTotalSleep()-startBackOff, timeout)
 				}
 			}
@@ -1832,7 +1833,8 @@ func (s *RegionRequestSender) SendReqCtx(
 		if regionErr != nil {
 			retry, err = s.onRegionError(bo, rpcCtx, req, regionErr)
 			if err != nil {
-				if cost := time.Since(startTime); cost > slowLogSendReqTime || cost > timeout {
+				if cost := time.Since(startTime); cost > slowLogSendReqTime || cost > timeout ||
+					(time.Duration(bo.GetTotalSleep()*int(time.Millisecond))+cost) > time.Second {
 					msg := fmt.Sprintf("send request on region error failed, err: %v", err.Error())
 					s.logSendReqError(bo, msg, regionID, retryTimes, req, cost, bo.GetTotalSleep()-startBackOff, timeout)
 				}
