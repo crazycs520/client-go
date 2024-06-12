@@ -926,7 +926,9 @@ func sendBatchRequest(
 		return nil, errors.WithMessage(context.DeadlineExceeded, "wait sendLoop")
 	}
 	waitSendDuration := time.Since(start)
-	metrics.TiKVBatchWaitDuration.Observe(float64(waitSendDuration))
+	if waitSendDuration > time.Microsecond {
+		metrics.TiKVBatchWaitDuration.Observe(float64(waitSendDuration))
+	}
 
 	select {
 	case res, ok := <-entry.res:
