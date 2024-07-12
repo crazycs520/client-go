@@ -187,7 +187,7 @@ func (a *connArray) Init(addr string, security config.Security, idleNotify *uint
 			}),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    time.Duration(keepAlive) * time.Second,
-				Timeout: time.Duration(keepAliveTimeout) * time.Second,
+				Timeout: time.Duration(keepAliveTimeout) * time.Millisecond,
 			}),
 		}, opts...)
 

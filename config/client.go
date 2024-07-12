@@ -126,7 +126,7 @@ func DefaultTiKVClient() TiKVClient {
 	return TiKVClient{
 		GrpcConnectionCount:       4,
 		GrpcKeepAliveTime:         10,
-		GrpcKeepAliveTimeout:      3,
+		GrpcKeepAliveTimeout:      3000,
 		GrpcCompressionType:       "none",
 		GrpcInitialWindowSize:     DefGrpcInitialWindowSize,
 		GrpcInitialConnWindowSize: DefGrpcInitialConnWindowSize,
