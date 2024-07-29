@@ -2463,8 +2463,10 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 		c.storeMu.Lock()
 		c.storeMu.stores[newStore.storeID] = newStore
 		c.storeMu.Unlock()
+		logutil.BgLogger().Info("store re-resolve, find new store, start sleep  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
+		time.Sleep(time.Second * 3)
+		logutil.BgLogger().Info("store re-resolve, find new store, finish sleep --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
 		s.setResolveState(deleted)
-		logutil.BgLogger().Info("store re-resolve, find new store  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
 		return false, nil
 	}
 	s.changeResolveStateTo(needCheck, resolved)
@@ -2624,7 +2626,7 @@ func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessSt
 }
 
 func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResolveInterval time.Duration) {
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 2)
 	defer func() {
 		ticker.Stop()
 		if liveness != reachable {
