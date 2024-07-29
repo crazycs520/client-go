@@ -470,9 +470,9 @@ func (c *RegionCache) asyncCheckAndResolveLoop(interval time.Duration) {
 		case <-c.ctx.Done():
 			return
 		case <-c.notifyCheckCh:
-			c.checkAndResolve(needCheckStores, func(s *Store) bool {
-				return s.getResolveState() == needCheck
-			})
+			//c.checkAndResolve(needCheckStores, func(s *Store) bool {
+			//	return s.getResolveState() == needCheck
+			//})
 		case <-ticker.C:
 			// refresh store to update labels.
 			c.checkAndResolve(needCheckStores, func(s *Store) bool {
@@ -2427,6 +2427,7 @@ func isStoreNotFoundError(err error) bool {
 // deleted.
 func (s *Store) reResolve(c *RegionCache) (bool, error) {
 	var addr string
+	logutil.BgLogger().Info("store re-resolve  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr))
 	store, err := c.pdClient.GetStore(context.Background(), s.storeID)
 	if err != nil {
 		metrics.RegionCacheCounterWithGetStoreError.Inc()
@@ -2461,7 +2462,7 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 		c.storeMu.stores[newStore.storeID] = newStore
 		c.storeMu.Unlock()
 		s.setResolveState(deleted)
-		logutil.BgLogger().Info("store re-resolve  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
+		logutil.BgLogger().Info("store re-resolve, find new store  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
 		return false, nil
 	}
 	s.changeResolveStateTo(needCheck, resolved)
