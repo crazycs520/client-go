@@ -2427,7 +2427,9 @@ func isStoreNotFoundError(err error) bool {
 // deleted.
 func (s *Store) reResolve(c *RegionCache) (bool, error) {
 	var addr string
-	logutil.BgLogger().Info("store re-resolve  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr))
+	if atomic.LoadUint32(&s.livenessState) != uint32(reachable) || atomic.LoadUint64(&s.state) != uint64(resolved) {
+		logutil.BgLogger().Info("store re-resolve  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", atomic.LoadUint32(&s.livenessState)), zap.Uint64("state", s.state))
+	}
 	store, err := c.pdClient.GetStore(context.Background(), s.storeID)
 	if err != nil {
 		metrics.RegionCacheCounterWithGetStoreError.Inc()
