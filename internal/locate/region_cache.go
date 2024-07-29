@@ -470,9 +470,9 @@ func (c *RegionCache) asyncCheckAndResolveLoop(interval time.Duration) {
 		case <-c.ctx.Done():
 			return
 		case <-c.notifyCheckCh:
-			//c.checkAndResolve(needCheckStores, func(s *Store) bool {
-			//	return s.getResolveState() == needCheck
-			//})
+			c.checkAndResolve(needCheckStores, func(s *Store) bool {
+				return s.getResolveState() == needCheck
+			})
 		case <-ticker.C:
 			// refresh store to update labels.
 			c.checkAndResolve(needCheckStores, func(s *Store) bool {
@@ -2611,7 +2611,7 @@ func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessSt
 	// It may be already started by another thread.
 	if atomic.CompareAndSwapUint32(&s.livenessState, uint32(reachable), uint32(liveness)) {
 		s.unreachableSince = time.Now()
-		reResolveInterval := 30 * time.Second
+		reResolveInterval := 60 * time.Second
 		if val, err := util.EvalFailpoint("injectReResolveInterval"); err == nil {
 			if dur, err := time.ParseDuration(val.(string)); err == nil {
 				reResolveInterval = dur
@@ -2622,7 +2622,7 @@ func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessSt
 }
 
 func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResolveInterval time.Duration) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(time.Second * 5)
 	defer func() {
 		ticker.Stop()
 		if liveness != reachable {
