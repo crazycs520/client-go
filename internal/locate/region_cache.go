@@ -2461,6 +2461,7 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 		c.storeMu.stores[newStore.storeID] = newStore
 		c.storeMu.Unlock()
 		s.setResolveState(deleted)
+		logutil.BgLogger().Info("store re-resolve  --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr), zap.Uint32("liveness", newStore.livenessState))
 		return false, nil
 	}
 	s.changeResolveStateTo(needCheck, resolved)
@@ -2639,10 +2640,10 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 		case <-ticker.C:
 			if time.Since(lastCheckPDTime) > reResolveInterval {
 				lastCheckPDTime = time.Now()
-
+				logutil.BgLogger().Info("[health check] check until health, re-resolve store --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr))
 				valid, err := s.reResolve(c)
 				if err != nil {
-					logutil.BgLogger().Warn("[health check] failed to re-resolve unhealthy store", zap.Error(err))
+					logutil.BgLogger().Warn("[health check] failed to re-resolve unhealthy store --cs--", zap.Error(err))
 				} else if !valid {
 					if s.getResolveState() == deleted {
 						// if the store is deleted, a new store with same id must be inserted (guaranteed by reResolve).
@@ -2657,6 +2658,7 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 							zap.String("newLabels", fmt.Sprintf("%v", newStore.labels)))
 						go newStore.checkUntilHealth(c, liveness, reResolveInterval)
 					}
+					logutil.BgLogger().Info("[health check] store meta deleted, stop checking --cs--", zap.Uint64("storeID", s.storeID), zap.String("addr", s.addr))
 					return
 				}
 			}
@@ -2665,7 +2667,7 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 			liveness = s.requestLiveness(bo, c)
 			atomic.StoreUint32(&s.livenessState, uint32(liveness))
 			if liveness == reachable {
-				logutil.BgLogger().Info("[health check] store became reachable", zap.Uint64("storeID", s.storeID))
+				logutil.BgLogger().Info("[health check] store became reachable --cs--", zap.Uint64("storeID", s.storeID))
 				return
 			}
 		}
@@ -2753,7 +2755,7 @@ func invokeKVStatusAPI(addr string, timeout time.Duration) (l livenessState) {
 
 	conn, cli, err := createKVHealthClient(ctx, addr)
 	if err != nil {
-		logutil.BgLogger().Info("[health check] create grpc connection failed", zap.String("store", addr), zap.Error(err))
+		logutil.BgLogger().Info("[health check] create grpc connection failed --cs--", zap.String("store", addr), zap.Error(err))
 		l = unreachable
 		return
 	}
@@ -2767,7 +2769,7 @@ func invokeKVStatusAPI(addr string, timeout time.Duration) (l livenessState) {
 	req := &healthpb.HealthCheckRequest{}
 	resp, err := cli.Check(ctx, req)
 	if err != nil {
-		logutil.BgLogger().Info("[health check] check health error", zap.String("store", addr), zap.Error(err))
+		logutil.BgLogger().Info("[health check] check health error --cs--", zap.String("store", addr), zap.Error(err))
 		l = unreachable
 		return
 	}
