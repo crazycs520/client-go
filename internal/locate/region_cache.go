@@ -2670,7 +2670,7 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 			bo := retry.NewNoopBackoff(c.ctx)
 			liveness = s.requestLiveness(bo, c)
 			atomic.StoreUint32(&s.livenessState, uint32(liveness))
-			logutil.BgLogger().Info("[health check] do requestLiveness --cs--", zap.Uint64("storeID", s.storeID), zap.String("liveness", liveness.String()))
+			logutil.BgLogger().Info("[health check] do requestLiveness --cs--", zap.Uint64("storeID", s.storeID), zap.String("liveness", liveness.String()), zap.Uint64("state", s.state))
 			if liveness == reachable {
 				logutil.BgLogger().Info("[health check] store became reachable --cs--", zap.Uint64("storeID", s.storeID))
 				return
