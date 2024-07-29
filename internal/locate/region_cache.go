@@ -2667,10 +2667,10 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 				}
 			}
 
-			logutil.BgLogger().Info("[health check] do requestLiveness --cs--", zap.Uint64("storeID", s.storeID))
 			bo := retry.NewNoopBackoff(c.ctx)
 			liveness = s.requestLiveness(bo, c)
 			atomic.StoreUint32(&s.livenessState, uint32(liveness))
+			logutil.BgLogger().Info("[health check] do requestLiveness --cs--", zap.Uint64("storeID", s.storeID), zap.String("liveness", liveness.String()))
 			if liveness == reachable {
 				logutil.BgLogger().Info("[health check] store became reachable --cs--", zap.Uint64("storeID", s.storeID))
 				return
@@ -2753,6 +2753,7 @@ func invokeKVStatusAPI(addr string, timeout time.Duration) (l livenessState) {
 		} else {
 			metrics.StatusCountWithError.Inc()
 		}
+		logutil.BgLogger().Info("invokeKVStatusAPI --cs--", zap.String("addr", addr), zap.String("liveness", l.String()))
 		metrics.TiKVStatusDuration.WithLabelValues(addr).Observe(time.Since(start).Seconds())
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
