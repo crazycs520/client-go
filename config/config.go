@@ -53,7 +53,7 @@ var (
 
 const (
 	// DefStoresRefreshInterval is the default value of StoresRefreshInterval
-	DefStoresRefreshInterval = 60
+	DefStoresRefreshInterval = 10
 )
 
 func init() {
