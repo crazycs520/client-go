@@ -2613,7 +2613,7 @@ func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessSt
 	// It may be already started by another thread.
 	if atomic.CompareAndSwapUint32(&s.livenessState, uint32(reachable), uint32(liveness)) {
 		s.unreachableSince = time.Now()
-		reResolveInterval := 60 * time.Second
+		reResolveInterval := 30 * time.Second
 		if val, err := util.EvalFailpoint("injectReResolveInterval"); err == nil {
 			if dur, err := time.ParseDuration(val.(string)); err == nil {
 				reResolveInterval = dur
@@ -2636,6 +2636,7 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 	}()
 	lastCheckPDTime := time.Now()
 
+	logutil.BgLogger().Info("[health check] start checkUntilHealth --cs--", zap.Uint64("storeID", s.storeID))
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -2666,6 +2667,7 @@ func (s *Store) checkUntilHealth(c *RegionCache, liveness livenessState, reResol
 				}
 			}
 
+			logutil.BgLogger().Info("[health check] do requestLiveness --cs--", zap.Uint64("storeID", s.storeID))
 			bo := retry.NewNoopBackoff(c.ctx)
 			liveness = s.requestLiveness(bo, c)
 			atomic.StoreUint32(&s.livenessState, uint32(liveness))
