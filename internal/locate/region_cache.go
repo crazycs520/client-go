@@ -2454,10 +2454,11 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 	storeType := tikvrpc.GetStoreTypeByMeta(store)
 	addr = store.GetAddress()
 	if s.addr != addr || !s.IsSameLabels(store.GetLabels()) {
-		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), storeType: storeType, labels: store.GetLabels(), state: uint64(resolved), livenessState: uint32(reachable)}
-		oldLivenessState := s.getLivenessState()
-		if oldLivenessState != reachable {
-			newStore.startHealthCheckLoopIfNeeded(c, oldLivenessState)
+		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), storeType: storeType, labels: store.GetLabels(), state: uint64(resolved)}
+		newStore.livenessState = atomic.LoadUint32(&s.livenessState)
+		if newStore.getLivenessState() != reachable {
+			newStore.unreachableSince = s.unreachableSince
+			go newStore.checkUntilHealth(c, newStore.getLivenessState(), storeReResolveInterval)
 		}
 		c.storeMu.Lock()
 		c.storeMu.stores[newStore.storeID] = newStore
@@ -2467,7 +2468,7 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 			zap.Uint64("store", s.storeID),
 			zap.String("old-addr", s.addr),
 			zap.Any("old-labels", s.labels),
-			zap.String("old-liveness", oldLivenessState.String()),
+			zap.String("old-liveness", s.getLivenessState().String()),
 			zap.String("new-addr", newStore.addr),
 			zap.Any("new-labels", newStore.labels),
 			zap.String("new-liveness", newStore.getLivenessState().String()))
@@ -2608,6 +2609,8 @@ func (s livenessState) String() string {
 	}
 }
 
+var storeReResolveInterval = 30 * time.Second
+
 func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessState) {
 	// This mechanism doesn't support non-TiKV stores currently.
 	if s.storeType != tikvrpc.TiKV {
@@ -2619,7 +2622,7 @@ func (s *Store) startHealthCheckLoopIfNeeded(c *RegionCache, liveness livenessSt
 	// It may be already started by another thread.
 	if atomic.CompareAndSwapUint32(&s.livenessState, uint32(reachable), uint32(liveness)) {
 		s.unreachableSince = time.Now()
-		reResolveInterval := 30 * time.Second
+		reResolveInterval := storeReResolveInterval
 		if val, err := util.EvalFailpoint("injectReResolveInterval"); err == nil {
 			if dur, err := time.ParseDuration(val.(string)); err == nil {
 				reResolveInterval = dur
