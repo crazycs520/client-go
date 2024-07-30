@@ -2454,22 +2454,23 @@ func (s *Store) reResolve(c *RegionCache) (bool, error) {
 	storeType := tikvrpc.GetStoreTypeByMeta(store)
 	addr = store.GetAddress()
 	if s.addr != addr || !s.IsSameLabels(store.GetLabels()) {
-		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), storeType: storeType, labels: store.GetLabels(), state: uint64(resolved)}
+		newStore := &Store{storeID: s.storeID, addr: addr, saddr: store.GetStatusAddress(), storeType: storeType, labels: store.GetLabels(), state: uint64(resolved), livenessState: uint32(reachable)}
+		oldLivenessState := s.getLivenessState()
+		if oldLivenessState != reachable {
+			newStore.startHealthCheckLoopIfNeeded(c, oldLivenessState)
+		}
 		c.storeMu.Lock()
 		c.storeMu.stores[newStore.storeID] = newStore
 		c.storeMu.Unlock()
 		s.setResolveState(deleted)
-		oldLivenessState := s.getLivenessState()
 		logutil.BgLogger().Info("store address or labels changed, add new store and mark old store deleted",
 			zap.Uint64("store", s.storeID),
 			zap.String("old-addr", s.addr),
 			zap.Any("old-labels", s.labels),
 			zap.String("old-liveness", oldLivenessState.String()),
 			zap.String("new-addr", newStore.addr),
-			zap.Any("new-labels", newStore.labels))
-		if oldLivenessState != reachable {
-			newStore.startHealthCheckLoopIfNeeded(c, oldLivenessState)
-		}
+			zap.Any("new-labels", newStore.labels),
+			zap.String("new-liveness", newStore.getLivenessState().String()))
 		return false, nil
 	}
 	s.changeResolveStateTo(needCheck, resolved)
