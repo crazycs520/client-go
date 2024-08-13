@@ -312,7 +312,7 @@ func initShortcuts() {
 	StaleReadReqCrossZoneCounter = TiKVStaleReadReqCounter.WithLabelValues("cross-zone")
 
 	StaleReadGlobalReqCounter = TiKVStaleReadReqCounter.WithLabelValues("local-stale-read")
-	StaleReadGlobalReqCounter = TiKVStaleReadReqCounter.WithLabelValues("global-stale-read")
+	StaleReadLocalReqCounter = TiKVStaleReadReqCounter.WithLabelValues("global-stale-read")
 
 	StaleReadLocalInBytes = TiKVStaleReadBytes.WithLabelValues("local", "in")
 	StaleReadLocalOutBytes = TiKVStaleReadBytes.WithLabelValues("local", "out")
