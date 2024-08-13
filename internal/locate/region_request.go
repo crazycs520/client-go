@@ -838,6 +838,14 @@ func (s *RegionRequestSender) SendReqCtx(
 		}
 
 		var isLocalTraffic bool
+		if staleReadCollector != nil {
+			if req.IsGlobalStaleRead() {
+				metrics.StaleReadGlobalReqCounter.Add(1)
+				logutil.Logger(bo.GetCtx()).Info("[debug-log] found global stale read", zap.Bool("stale-read", req.StaleRead), zap.Uint64("ts", req.GetStartTS()))
+			} else {
+				metrics.StaleReadLocalReqCounter.Add(1)
+			}
+		}
 		if staleReadCollector != nil && s.replicaSelector != nil && s.replicaSelector.target != nil {
 			isLocalTraffic = s.replicaSelector.target.store.IsLabelsMatch(s.replicaSelector.option.labels)
 			staleReadCollector.onReq(req, isLocalTraffic)
@@ -1787,12 +1795,6 @@ func (s *staleReadMetricsCollector) onReq(req *tikvrpc.Request, isLocalTraffic b
 	} else {
 		metrics.StaleReadRemoteOutBytes.Add(float64(size))
 		metrics.StaleReadReqCrossZoneCounter.Add(1)
-	}
-
-	if req.IsGlobalStaleRead() {
-		metrics.StaleReadGlobalReqCounter.Add(1)
-	} else {
-		metrics.StaleReadLocalReqCounter.Add(1)
 	}
 }
 
