@@ -1788,6 +1788,12 @@ func (s *staleReadMetricsCollector) onReq(req *tikvrpc.Request, isLocalTraffic b
 		metrics.StaleReadRemoteOutBytes.Add(float64(size))
 		metrics.StaleReadReqCrossZoneCounter.Add(1)
 	}
+
+	if req.IsGlobalStaleRead() {
+		metrics.StaleReadGlobalReqCounter.Add(1)
+	} else {
+		metrics.StaleReadLocalReqCounter.Add(1)
+	}
 }
 
 func (s *staleReadMetricsCollector) onResp(tp tikvrpc.CmdType, resp *tikvrpc.Response, isLocalTraffic bool) {
