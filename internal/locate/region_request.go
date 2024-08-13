@@ -1437,6 +1437,11 @@ func (s *RegionRequestSender) SendReqCtx(
 				isLocalTraffic = target.store.IsLabelsMatch(s.replicaSelector.labels)
 				staleReadCollector.onReq(req, isLocalTraffic)
 			}
+			if req.IsGlobalStaleRead() {
+				metrics.StaleReadGlobalReqCounter.Add(1)
+			} else {
+				metrics.StaleReadLocalReqCounter.Add(1)
+			}
 		}
 
 		logutil.Eventf(bo.GetCtx(), "send %s request to region %d at %s", req.Type, regionID.id, rpcCtx.Addr)

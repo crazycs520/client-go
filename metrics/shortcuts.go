@@ -163,7 +163,10 @@ var (
 	StaleReadHitCounter  prometheus.Counter
 	StaleReadMissCounter prometheus.Counter
 
-	StaleReadReqLocalCounter     prometheus.Counter
+	StaleReadReqLocalCounter prometheus.Counter
+
+	StaleReadGlobalReqCounter    prometheus.Counter
+	StaleReadLocalReqCounter     prometheus.Counter
 	StaleReadReqCrossZoneCounter prometheus.Counter
 
 	StaleReadLocalInBytes   prometheus.Counter
@@ -307,6 +310,9 @@ func initShortcuts() {
 
 	StaleReadReqLocalCounter = TiKVStaleReadReqCounter.WithLabelValues("local")
 	StaleReadReqCrossZoneCounter = TiKVStaleReadReqCounter.WithLabelValues("cross-zone")
+
+	StaleReadGlobalReqCounter = TiKVStaleReadReqCounter.WithLabelValues("local-stale-read")
+	StaleReadGlobalReqCounter = TiKVStaleReadReqCounter.WithLabelValues("global-stale-read")
 
 	StaleReadLocalInBytes = TiKVStaleReadBytes.WithLabelValues("local", "in")
 	StaleReadLocalOutBytes = TiKVStaleReadBytes.WithLabelValues("local", "out")
