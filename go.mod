@@ -30,7 +30,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.2.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.10.0
 	google.golang.org/grpc v1.63.2
 )
 
@@ -44,6 +44,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/onsi/gomega v1.20.1 // indirect
+	github.com/panjf2000/ants/v2 v2.11.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect

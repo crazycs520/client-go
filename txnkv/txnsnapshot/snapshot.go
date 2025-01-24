@@ -37,6 +37,7 @@ package txnsnapshot
 import (
 	"bytes"
 	"context"
+	"github.com/panjf2000/ants/v2"
 	"math"
 	"runtime"
 	"strconv"
@@ -156,7 +157,7 @@ type KVSnapshot struct {
 	*util.RequestSource
 	isPipelined bool
 
-	workerPool *BatchGetWorkerPool
+	workerPool *ants.MultiPool
 }
 
 // NewTiKVSnapshot creates a snapshot of an TiKV store.
@@ -373,16 +374,14 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 			backoffer = bo.Clone()
 		}
 		batch := batch1
+		succ := false
 		if s.workerPool != nil {
-			s.workerPool.addTask(&BatchGetTask{
-				snapshot: s,
-				batch:    batch,
-				readTier: readTier,
-				backoff:  backoffer,
-				collectF: collectF,
-				respCh:   ch,
+			err := s.workerPool.Submit(func() {
+				ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
 			})
-		} else {
+			succ = err == nil
+		}
+		if !succ {
 			go func() {
 				growStackForBatchGetWorker()
 				ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
@@ -1194,7 +1193,7 @@ func (s *KVSnapshot) SetPipelined(ts uint64) {
 	s.resolvedLocks.Put(ts)
 }
 
-func (s *KVSnapshot) SetBatchGetWorkerPool(pool *BatchGetWorkerPool) {
+func (s *KVSnapshot) SetWorkerPool(pool *ants.MultiPool) {
 	s.workerPool = pool
 }
 
