@@ -155,6 +155,8 @@ type KVSnapshot struct {
 	sampleStep uint32
 	*util.RequestSource
 	isPipelined bool
+
+	workerPool *BatchGetWorkerPool
 }
 
 // NewTiKVSnapshot creates a snapshot of an TiKV store.
@@ -371,18 +373,21 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 			backoffer = bo.Clone()
 		}
 		batch := batch1
-		globalBatchGetWorkerPool.addTask(&BatchGetTask{
-			snapshot: s,
-			batch:    batch,
-			readTier: readTier,
-			backoff:  backoffer,
-			collectF: collectF,
-			respCh:   ch,
-		})
-		//go func() {
-		//	growStackForBatchGetWorker()
-		//	ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
-		//}()
+		if s.workerPool != nil {
+			s.workerPool.addTask(&BatchGetTask{
+				snapshot: s,
+				batch:    batch,
+				readTier: readTier,
+				backoff:  backoffer,
+				collectF: collectF,
+				respCh:   ch,
+			})
+		} else {
+			go func() {
+				growStackForBatchGetWorker()
+				ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
+			}()
+		}
 	}
 	for i := 0; i < len(batches); i++ {
 		if e := <-ch; e != nil {
@@ -412,8 +417,6 @@ type BatchGetTask struct {
 	respCh   chan error
 }
 
-var globalBatchGetWorkerPool = NewBatchGetWorkerPool(300)
-
 func NewBatchGetWorkerPool(max int64) *BatchGetWorkerPool {
 	return &BatchGetWorkerPool{
 		max:    max,
@@ -442,6 +445,10 @@ func (wp *BatchGetWorkerPool) spawnWorker() {
 			}
 		}
 	}()
+}
+
+func (wp *BatchGetWorkerPool) Close() {
+	wp.finish.Store(true)
 }
 
 func (s *KVSnapshot) buildBatchGetRequest(keys [][]byte, busyThresholdMs int64, readTier int) (*tikvrpc.Request, error) {
@@ -1185,6 +1192,10 @@ func (s *KVSnapshot) SetPipelined(ts uint64) {
 	// Otherwise, the transaction will attempt to resolve its own lock, leading to a mutual wait with the primary key TTL.
 	// Currently, we skip these locks by resolvedLocks mechanism.
 	s.resolvedLocks.Put(ts)
+}
+
+func (s *KVSnapshot) SetBatchGetWorkerPool(pool *BatchGetWorkerPool) {
+	s.workerPool = pool
 }
 
 // SnapshotRuntimeStats records the runtime stats of snapshot.
