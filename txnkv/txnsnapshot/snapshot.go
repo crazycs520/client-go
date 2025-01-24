@@ -371,10 +371,18 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 			backoffer = bo.Clone()
 		}
 		batch := batch1
-		go func() {
-			growStackForBatchGetWorker()
-			ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
-		}()
+		globalBatchGetWorkerPool.addTask(&BatchGetTask{
+			snapshot: s,
+			batch:    batch,
+			readTier: readTier,
+			backoff:  backoffer,
+			collectF: collectF,
+			respCh:   ch,
+		})
+		//go func() {
+		//	growStackForBatchGetWorker()
+		//	ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
+		//}()
 	}
 	for i := 0; i < len(batches); i++ {
 		if e := <-ch; e != nil {
@@ -385,6 +393,52 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 		}
 	}
 	return err
+}
+
+type BatchGetWorkerPool struct {
+	finish  atomic.Bool
+	count   atomic.Int64
+	running atomic.Int64
+	taskCh  chan *BatchGetTask
+}
+
+type BatchGetTask struct {
+	snapshot *KVSnapshot
+	batch    batchKeys
+	readTier int
+	backoff  *retry.Backoffer
+	collectF func(k, v []byte)
+	respCh   chan error
+}
+
+var globalBatchGetWorkerPool = NewBatchGetWorkerPool()
+
+func NewBatchGetWorkerPool() *BatchGetWorkerPool {
+	return &BatchGetWorkerPool{
+		taskCh: make(chan *BatchGetTask, 1),
+	}
+}
+
+func (wp *BatchGetWorkerPool) addTask(task *BatchGetTask) {
+	running := wp.running.Add(1)
+	if running >= wp.count.Load() {
+		wp.spawnWorker()
+	}
+	wp.taskCh <- task
+}
+
+func (wp *BatchGetWorkerPool) spawnWorker() {
+	wp.count.Add(1)
+	go func() {
+		for task := range wp.taskCh {
+			err := task.snapshot.batchGetSingleRegion(task.backoff, task.batch, task.readTier, task.collectF)
+			wp.running.Add(-1)
+			task.respCh <- err
+			if wp.finish.Load() {
+				return
+			}
+		}
+	}()
 }
 
 func (s *KVSnapshot) buildBatchGetRequest(keys [][]byte, busyThresholdMs int64, readTier int) (*tikvrpc.Request, error) {
