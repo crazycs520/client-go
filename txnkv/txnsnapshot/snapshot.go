@@ -427,7 +427,7 @@ func NewBatchGetWorkerPool(max int64) *BatchGetWorkerPool {
 func (wp *BatchGetWorkerPool) addTask(task *BatchGetTask) {
 	running := wp.running.Add(1)
 	total := wp.count.Load()
-	if running >= total && total < wp.max {
+	if running > total && total < wp.max {
 		wp.spawnWorker()
 	}
 	wp.taskCh <- task
