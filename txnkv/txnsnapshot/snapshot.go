@@ -397,6 +397,7 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 
 type BatchGetWorkerPool struct {
 	finish  atomic.Bool
+	max     int64
 	count   atomic.Int64
 	running atomic.Int64
 	taskCh  chan *BatchGetTask
@@ -411,10 +412,11 @@ type BatchGetTask struct {
 	respCh   chan error
 }
 
-var globalBatchGetWorkerPool = NewBatchGetWorkerPool()
+var globalBatchGetWorkerPool = NewBatchGetWorkerPool(300)
 
-func NewBatchGetWorkerPool() *BatchGetWorkerPool {
+func NewBatchGetWorkerPool(max int64) *BatchGetWorkerPool {
 	return &BatchGetWorkerPool{
+		max:    max,
 		taskCh: make(chan *BatchGetTask, 1),
 	}
 }
@@ -422,7 +424,7 @@ func NewBatchGetWorkerPool() *BatchGetWorkerPool {
 func (wp *BatchGetWorkerPool) addTask(task *BatchGetTask) {
 	running := wp.running.Add(1)
 	total := wp.count.Load()
-	if running >= total && total < 500 {
+	if running >= total && total < wp.max {
 		wp.spawnWorker()
 	}
 	wp.taskCh <- task
