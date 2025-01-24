@@ -37,6 +37,8 @@ package txnsnapshot
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"github.com/panjf2000/ants/v2"
 	"math"
 	"runtime"
 	"strconv"
@@ -371,18 +373,16 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 			backoffer = bo.Clone()
 		}
 		batch := batch1
-		globalBatchGetWorkerPool.addTask(&BatchGetTask{
-			snapshot: s,
-			batch:    batch,
-			readTier: readTier,
-			backoff:  backoffer,
-			collectF: collectF,
-			respCh:   ch,
+		err := globalBatchGetWorkerPool.Submit(func() {
+			ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
 		})
-		//go func() {
-		//	growStackForBatchGetWorker()
-		//	ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
-		//}()
+		if err != nil {
+			fmt.Println("submit batch get worker failed", err)
+			go func() {
+				growStackForBatchGetWorker()
+				ch <- s.batchGetSingleRegion(backoffer, batch, readTier, collectF)
+			}()
+		}
 	}
 	for i := 0; i < len(batches); i++ {
 		if e := <-ch; e != nil {
@@ -395,53 +395,14 @@ func (s *KVSnapshot) batchGetKeysByRegions(bo *retry.Backoffer, keys [][]byte, r
 	return err
 }
 
-type BatchGetWorkerPool struct {
-	finish  atomic.Bool
-	max     int64
-	count   atomic.Int64
-	running atomic.Int64
-	taskCh  chan *BatchGetTask
-}
+var globalBatchGetWorkerPool *ants.MultiPool
 
-type BatchGetTask struct {
-	snapshot *KVSnapshot
-	batch    batchKeys
-	readTier int
-	backoff  *retry.Backoffer
-	collectF func(k, v []byte)
-	respCh   chan error
-}
-
-var globalBatchGetWorkerPool = NewBatchGetWorkerPool(300)
-
-func NewBatchGetWorkerPool(max int64) *BatchGetWorkerPool {
-	return &BatchGetWorkerPool{
-		max:    max,
-		taskCh: make(chan *BatchGetTask, 1),
+func init() {
+	var err error
+	globalBatchGetWorkerPool, err = ants.NewMultiPool(16, 20, ants.RoundRobin, ants.WithExpiryDuration(time.Second*5))
+	if err != nil {
+		panic("initialize globalBatchGetWorkerPool failed")
 	}
-}
-
-func (wp *BatchGetWorkerPool) addTask(task *BatchGetTask) {
-	running := wp.running.Add(1)
-	total := wp.count.Load()
-	if running >= total && total < wp.max {
-		wp.spawnWorker()
-	}
-	wp.taskCh <- task
-}
-
-func (wp *BatchGetWorkerPool) spawnWorker() {
-	wp.count.Add(1)
-	go func() {
-		for task := range wp.taskCh {
-			err := task.snapshot.batchGetSingleRegion(task.backoff, task.batch, task.readTier, task.collectF)
-			wp.running.Add(-1)
-			task.respCh <- err
-			if wp.finish.Load() {
-				return
-			}
-		}
-	}()
 }
 
 func (s *KVSnapshot) buildBatchGetRequest(keys [][]byte, busyThresholdMs int64, readTier int) (*tikvrpc.Request, error) {
