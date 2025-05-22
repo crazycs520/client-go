@@ -42,8 +42,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// AppLogger is the default global logger for this project.
+var AppLogger *zap.Logger
+
 // BgLogger returns the default global logger.
 func BgLogger() *zap.Logger {
+	if AppLogger != nil {
+		return AppLogger
+	}
 	return log.L()
 }
 
@@ -53,7 +59,7 @@ func Logger(ctx context.Context) *zap.Logger {
 	if ctxlogger, ok := ctx.Value(CtxLogKey).(*zap.Logger); ok {
 		return ctxlogger
 	}
-	return log.L()
+	return BgLogger()
 }
 
 type ctxLogKeyType struct{}

@@ -40,7 +40,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/tikv/client-go/v2/internal/logutil"
 	"github.com/tikv/client-go/v2/metrics"
@@ -352,6 +351,6 @@ func IsErrorUndetermined(err error) bool {
 // Log logs the error if it is not nil.
 func Log(err error) {
 	if err != nil {
-		log.Error("encountered error", zap.Error(err), zap.Stack("stack"))
+		logutil.BgLogger().Error("encountered error", zap.Error(err), zap.Stack("stack"))
 	}
 }
