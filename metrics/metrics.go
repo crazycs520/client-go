@@ -881,6 +881,7 @@ func initMetrics(namespace, subsystem string, constLabels prometheus.Labels) {
 		}, []string{"name"})
 
 	initShortcuts()
+	initMetrics4PkDB(namespace, subsystem, constLabels)
 }
 
 func init() {
@@ -979,6 +980,8 @@ func RegisterMetrics() {
 	prometheus.MustRegister(TiKVFFIMicroSecHistogramVec)
 	prometheus.MustRegister(TiKVFFICallMicroSecHistogramVec)
 	prometheus.MustRegister(TiKVFFIWaitMicroSecHistogramVec)
+
+	registerMetrics4PkDB()
 }
 
 // readCounter reads the value of a prometheus.Counter.

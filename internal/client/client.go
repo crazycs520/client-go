@@ -654,15 +654,18 @@ func (c *RPCClient) sendRequest(ctx context.Context, addr string, req *tikvrpc.R
 		}
 	}()
 
-	// TiDB RPC server supports batch RPC, but batch connection will send heart beat, It's not necessary since
-	// request to TiDB is not high frequency.
-	//pri := req.GetResourceControlContext().GetOverridePriority()
-	//if config.GetGlobalConfig().TiKVClient.MaxBatchSize > 0 && enableBatch {
-	//	if batchReq := req.ToBatchCommandsRequest(); batchReq != nil {
-	//		defer trace.StartRegion(ctx, req.Type.String()).End()
-	//		return wrapErrConn(sendBatchRequest(ctx, addr, req.ForwardedHost, connArray.batchConn, batchReq, timeout, pri))
-	//	}
-	//}
+	// we only use batching commands when FFI is not enabled.
+	if callFFI == nil {
+		// TiDB RPC server supports batch RPC, but batch connection will send heart beat, It's not necessary since
+		// request to TiDB is not high frequency.
+		pri := req.GetResourceControlContext().GetOverridePriority()
+		if config.GetGlobalConfig().TiKVClient.MaxBatchSize > 0 && enableBatch {
+			if batchReq := req.ToBatchCommandsRequest(); batchReq != nil {
+				defer trace.StartRegion(ctx, req.Type.String()).End()
+				return wrapErrConn(sendBatchRequest(ctx, addr, req.ForwardedHost, connArray.batchConn, batchReq, timeout, pri))
+			}
+		}
+	}
 
 	clientConn := connArray.Get()
 	if state := clientConn.GetState(); state == connectivity.TransientFailure {
