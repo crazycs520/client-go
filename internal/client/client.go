@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -283,8 +284,6 @@ func (c *monitoredConn) Close() error {
 	}
 	return nil
 }
-
-var TiKVAddrInSameProcess string
 
 func (a *connArray) Init(addr string, security config.Security, idleNotify *uint32, enableBatch bool, eventListener *atomic.Pointer[ClientEventListener], opts ...grpc.DialOption) error {
 	a.target = addr

@@ -118,9 +118,6 @@ var (
 	TiKVStaleRegionFromPDCounter                   prometheus.Counter
 	TiKVPipelinedFlushThrottleSecondsHistogram     prometheus.Histogram
 	TiKVTxnWriteConflictCounter                    prometheus.Counter
-	TiKVFFIMicroSecHistogramVec                    *prometheus.HistogramVec
-	TiKVFFICallMicroSecHistogramVec                *prometheus.HistogramVec
-	TiKVFFIWaitMicroSecHistogramVec                *prometheus.HistogramVec
 )
 
 // Label constants.
@@ -850,36 +847,6 @@ func initMetrics(namespace, subsystem string, constLabels prometheus.Labels) {
 			Help:      "Counter of txn write conflict",
 		})
 
-	TiKVFFIMicroSecHistogramVec = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace:   namespace,
-			Subsystem:   subsystem,
-			Name:        "ffi_duration_microsecond",
-			Help:        "The duration in microsecond of FFI functions, including rust cost and go cost",
-			Buckets:     prometheus.ExponentialBucketsRange(10, 10_000, 20), // 10us ~ 10ms
-			ConstLabels: constLabels,
-		}, []string{"name"})
-
-	TiKVFFICallMicroSecHistogramVec = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace:   namespace,
-			Subsystem:   subsystem,
-			Name:        "ffi_call_duration_microsecond",
-			Help:        "The duration in microsecond of FFI call request",
-			Buckets:     prometheus.ExponentialBucketsRange(10, 10_000, 20), // 10us ~ 10ms
-			ConstLabels: constLabels,
-		}, []string{"name"})
-
-	TiKVFFIWaitMicroSecHistogramVec = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace:   namespace,
-			Subsystem:   subsystem,
-			Name:        "ffi_wait_duration_microsecond",
-			Help:        "The duration in microsecond of FFI wait response",
-			Buckets:     prometheus.ExponentialBucketsRange(10, 10_000, 20), // 10us ~ 10ms
-			ConstLabels: constLabels,
-		}, []string{"name"})
-
 	initShortcuts()
 	initMetrics4PkDB(namespace, subsystem, constLabels)
 }
@@ -977,9 +944,6 @@ func RegisterMetrics() {
 	prometheus.MustRegister(TiKVStaleRegionFromPDCounter)
 	prometheus.MustRegister(TiKVPipelinedFlushThrottleSecondsHistogram)
 	prometheus.MustRegister(TiKVTxnWriteConflictCounter)
-	prometheus.MustRegister(TiKVFFIMicroSecHistogramVec)
-	prometheus.MustRegister(TiKVFFICallMicroSecHistogramVec)
-	prometheus.MustRegister(TiKVFFIWaitMicroSecHistogramVec)
 
 	registerMetrics4PkDB()
 }
