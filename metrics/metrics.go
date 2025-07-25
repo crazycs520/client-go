@@ -890,6 +890,7 @@ func initMetrics(namespace, subsystem string, constLabels prometheus.Labels) {
 		}, []string{LblResult})
 
 	initShortcuts()
+	initMetrics4PkDB(namespace, subsystem, constLabels)
 }
 
 func init() {
@@ -986,8 +987,8 @@ func RegisterMetrics() {
 	prometheus.MustRegister(TiKVStaleRegionFromPDCounter)
 	prometheus.MustRegister(TiKVPipelinedFlushThrottleSecondsHistogram)
 	prometheus.MustRegister(TiKVTxnWriteConflictCounter)
-	prometheus.MustRegister(TiKVAsyncSendReqCounter)
-	prometheus.MustRegister(TiKVAsyncBatchGetCounter)
+
+	registerMetrics4PkDB()
 }
 
 // readCounter reads the value of a prometheus.Counter.

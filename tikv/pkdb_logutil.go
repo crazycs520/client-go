@@ -30,3 +30,7 @@ func WithLogContext(ctx context.Context, logger *zap.Logger) context.Context {
 func SetLogContextKey(key interface{}) {
 	logutil.CtxLogKey = key
 }
+
+func SetAppLogger(log *zap.Logger) {
+	logutil.AppLogger = log
+}
