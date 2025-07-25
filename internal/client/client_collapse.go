@@ -40,6 +40,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pkg/errors"
 	"github.com/tikv/client-go/v2/tikvrpc"
 	"github.com/tikv/client-go/v2/util/async"
@@ -79,11 +80,6 @@ func (r reqCollapse) SendRequestAsync(ctx context.Context, addr string, req *tik
 	if r.Client == nil {
 		panic("client should not be nil")
 	}
-	cli, ok := r.Client.(ClientAsync)
-	if !ok {
-		cb.Invoke(nil, errors.Errorf("%T dose not implement ClientAsync interface", r.Client))
-		return
-	}
 	if req.Type == tikvrpc.CmdResolveLock && len(req.ResolveLock().Keys) == 0 && len(req.ResolveLock().TxnInfos) == 0 {
 		// try collapse resolve lock request.
 		key := strconv.FormatUint(req.Context.RegionId, 10) + "-" + strconv.FormatUint(req.ResolveLock().StartVersion, 10)
@@ -106,7 +102,7 @@ func (r reqCollapse) SendRequestAsync(ctx context.Context, addr string, req *tik
 			}
 		})
 	} else {
-		cli.SendRequestAsync(ctx, addr, req, cb)
+		r.Client.SendRequestAsync(ctx, addr, req, cb)
 	}
 }
 
@@ -136,6 +132,9 @@ func (r reqCollapse) collapse(ctx context.Context, key string, sf *singleflight.
 	addr string, req *tikvrpc.Request, timeout time.Duration) (resp *tikvrpc.Response, err error) {
 	// because the request may be used by other goroutines, copy the request to avoid data race.
 	copyReq := *req
+	if req.Type == tikvrpc.CmdResolveLock && req.Req != nil {
+		copyReq.Req = proto.Clone(req.ResolveLock())
+	}
 	rsC := sf.DoChan(key, func() (interface{}, error) {
 		return r.Client.SendRequest(context.Background(), addr, &copyReq, ReadTimeoutShort) // use resolveLock timeout.
 	})

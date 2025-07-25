@@ -32,13 +32,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type ClientAsync interface {
-	Client
-	// SendRequestAsync sends a request to the target address asynchronously.
-	SendRequestAsync(ctx context.Context, addr string, req *tikvrpc.Request, cb async.Callback[*tikvrpc.Response])
-}
-
-// SendRequestAsync implements the ClientAsync interface.
+// SendRequestAsync sends a request to the target address asynchronously.
 func (c *RPCClient) SendRequestAsync(ctx context.Context, addr string, req *tikvrpc.Request, cb async.Callback[*tikvrpc.Response]) {
 	var err error
 
@@ -78,10 +72,10 @@ func (c *RPCClient) SendRequestAsync(ctx context.Context, addr string, req *tikv
 	}
 	tikvrpc.AttachContext(req, req.Context)
 
-	// TODO(zyguan): If the client created `WithGRPCDialOptions(grpc.WithBlock())`, `getConnArray` might be blocked for
+	// TODO(zyguan): If the client created `WithGRPCDialOptions(grpc.WithBlock())`, `getConnPool` might be blocked for
 	// a while when the corresponding conn array is uninitialized. However, since tidb won't set this option, we just
-	// keep `getConnArray` synchronous for now.
-	connArray, err := c.getConnArray(addr, true)
+	// keep `getConnPool` synchronous for now.
+	connPool, err := c.getConnPool(addr, true)
 	if err != nil {
 		cb.Invoke(nil, err)
 		return
@@ -119,16 +113,7 @@ func (c *RPCClient) SendRequestAsync(ctx context.Context, addr string, req *tikv
 		metrics.BatchRequestDurationDone.Observe(elapsed.Seconds())
 
 		// rpc metrics
-		connArray.updateRPCMetrics(req, resp, elapsed)
-
-		// resource control
-		if stmtExec := ctx.Value(util.ExecDetailsKey); stmtExec != nil {
-			execDetails := stmtExec.(*util.ExecDetails)
-			atomic.AddInt64(&execDetails.WaitKVRespDuration, int64(elapsed))
-			execNetworkCollector := networkCollector{}
-			execNetworkCollector.onReq(req, execDetails)
-			execNetworkCollector.onResp(req, resp, execDetails)
-		}
+		connPool.updateRPCMetrics(req, resp, elapsed)
 
 		// tracing
 		if spanRPC != nil {
@@ -146,7 +131,7 @@ func (c *RPCClient) SendRequestAsync(ctx context.Context, addr string, req *tikv
 			resp, err = c.option.codec.DecodeResponse(req, resp)
 		}
 
-		return resp, WrapErrConn(err, connArray)
+		return resp, WrapErrConn(err, connPool)
 	})
 
 	stop = context.AfterFunc(ctx, func() {
@@ -154,7 +139,7 @@ func (c *RPCClient) SendRequestAsync(ctx context.Context, addr string, req *tikv
 		entry.error(ctx.Err())
 	})
 
-	batchConn := connArray.batchConn
+	batchConn := connPool.batchConn
 	if val, err := util.EvalFailpoint("mockBatchCommandsChannelFullOnAsyncSend"); err == nil {
 		mockBatchCommandsChannelFullOnAsyncSend(ctx, batchConn, cb, val)
 	}

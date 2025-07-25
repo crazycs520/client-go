@@ -220,14 +220,8 @@ func (action actionPessimisticLock) handleSingleBatch(
 func (action actionPessimisticLock) handleRegionError(
 	c *twoPhaseCommitter, bo *retry.Backoffer, batch *batchMutations, regionErr *errorpb.Error,
 ) (finished bool, err error) {
-	// For other region error and the fake region error, backoff because
-	// there's something wrong.
-	// For the real EpochNotMatch error, don't backoff.
-	if regionErr.GetEpochNotMatch() == nil || locate.IsFakeRegionError(regionErr) {
-		err = bo.Backoff(retry.BoRegionMiss, errors.New(regionErr.String()))
-		if err != nil {
-			return true, err
-		}
+	if err := retry.MayBackoffForRegionError(regionErr, bo); err != nil {
+		return true, err
 	}
 	same, err := batch.relocate(bo, c.store.GetRegionCache())
 	if err != nil {
@@ -531,6 +525,10 @@ func (action actionPessimisticLock) handlePessimisticLockResponseForceLockMode(
 	return true, nil
 }
 
+func (actionPessimisticLock) isInterruptible() bool {
+	return true
+}
+
 func (actionPessimisticRollback) handleSingleBatch(
 	c *twoPhaseCommitter, bo *retry.Backoffer, batch batchMutations,
 ) error {
@@ -564,6 +562,10 @@ func (actionPessimisticRollback) handleSingleBatch(
 		return c.pessimisticRollbackMutations(bo, batch.mutations)
 	}
 	return nil
+}
+
+func (actionPessimisticRollback) isInterruptible() bool {
+	return false
 }
 
 func (c *twoPhaseCommitter) pessimisticLockMutations(

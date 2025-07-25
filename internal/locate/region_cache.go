@@ -1350,7 +1350,16 @@ func (c *RegionCache) BatchLocateKeyRanges(bo *retry.Backoffer, keyRanges []kv.K
 
 	// 2. load remaining regions from pd client
 	for len(uncachedRanges) > 0 {
-		regions, err := c.BatchLoadRegionsWithKeyRanges(bo, uncachedRanges, defaultRegionsPerBatch, opts...)
+		// If we send too many ranges to PD, it may exceed the size of grpc limitation or cause a timeout error.
+		// So we limit the number of ranges per batch to avoid this issue.
+		maxRangesPerBatch := 16 * defaultRegionsPerBatch
+		var toBeSentRanges []router.KeyRange
+		if len(uncachedRanges) > maxRangesPerBatch {
+			toBeSentRanges = uncachedRanges[:maxRangesPerBatch]
+		} else {
+			toBeSentRanges = uncachedRanges
+		}
+		regions, err := c.BatchLoadRegionsWithKeyRanges(bo, toBeSentRanges, defaultRegionsPerBatch, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -1549,6 +1558,8 @@ func (c *RegionCache) findRegionByKey(bo *retry.Backoffer, key []byte, isEndKey 
 			logutil.Logger(bo.GetCtx()).Error("load region failure",
 				zap.String("key", redact.Key(key)), zap.Error(err),
 				zap.String("encode-key", redact.Key(c.codec.EncodeRegionKey(key))))
+			// mark as need sync reload
+			r.setSyncFlags(needReloadOnAccess)
 		} else {
 			logutil.Eventf(bo.GetCtx(), "load region %d from pd, due to need-reload", lr.GetID())
 			reloadOnAccess := flags&needReloadOnAccess > 0
@@ -1693,6 +1704,8 @@ func (c *RegionCache) LocateRegionByID(bo *retry.Backoffer, regionID uint64) (*K
 				// ignore error and use old region info.
 				logutil.Logger(bo.GetCtx()).Error("load region failure",
 					zap.Uint64("regionID", regionID), zap.Error(err))
+				// mark as need sync reload
+				r.setSyncFlags(needReloadOnAccess)
 			} else {
 				r = lr
 				c.mu.Lock()
@@ -1812,7 +1825,7 @@ func (c *RegionCache) BatchLoadRegionsWithKeyRange(bo *retry.Backoffer, startKey
 	// TODO(youjiali1995): scanRegions always fetch regions from PD and these regions don't contain buckets information
 	// for less traffic, so newly inserted regions in region cache don't have buckets information. We should improve it.
 	for _, region := range regions {
-		c.insertRegionToCache(region, true, false)
+		c.insertRegionToCache(region, false, false)
 	}
 
 	return
@@ -1837,7 +1850,7 @@ func (c *RegionCache) BatchLoadRegionsWithKeyRanges(bo *retry.Backoffer, keyRang
 	defer c.mu.Unlock()
 
 	for _, region := range regions {
-		c.insertRegionToCache(region, true, false)
+		c.insertRegionToCache(region, false, false)
 	}
 	return
 }
@@ -2219,7 +2232,7 @@ func (c *RegionCache) scanRegions(bo *retry.Backoffer, startKey, endKey []byte, 
 			}
 		}
 		start := time.Now()
-		//nolint:staticcheck
+		// TODO: ScanRegions has been deprecated in favor of BatchScanRegions.
 		regionsInfo, err := c.pdClient.ScanRegions(withPDCircuitBreaker(ctx), startKey, endKey, limit, opt.WithAllowFollowerHandle())
 		metrics.LoadRegionCacheHistogramWithRegions.Observe(time.Since(start).Seconds())
 		if err != nil {

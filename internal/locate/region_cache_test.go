@@ -2996,3 +2996,115 @@ func BenchmarkBatchLocateKeyRangesFromCache(t *testing.B) {
 	}
 	s.TearDownTest()
 }
+
+func (s *testRegionCacheSuite) TestRegionCacheValidAfterLoading() {
+	s.cache.clear()
+
+	// Split regions at "a", "b", "c", ..., "j"
+	regions := make([]uint64, 0, 11)
+	region1 := s.region1
+	regions = append(regions, region1)
+	for i := 0; i < 10; i++ {
+		region2 := s.cluster.AllocID()
+		newPeers := s.cluster.AllocIDs(2)
+		s.cluster.Split(region1, region2, []byte{'a' + byte(i)}, newPeers, newPeers[0])
+		region1 = region2
+		regions = append(regions, region1)
+	}
+
+	fns := []func(){
+		func() {
+			_, err := s.cache.LocateKeyRange(s.bo, []byte("a"), []byte("e"))
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.BatchLocateKeyRanges(s.bo, []kv.KeyRange{{StartKey: []byte("a"), EndKey: []byte("e")}})
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.LocateKey(s.bo, []byte("b"))
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.LocateEndKey(s.bo, []byte("c"))
+			s.Nil(err)
+		},
+		func() {
+			for _, regionID := range regions {
+				_, err := s.cache.LocateRegionByID(s.bo, regionID)
+				s.Nil(err)
+			}
+		},
+		func() {
+			_, _, err := s.cache.GroupKeysByRegion(s.bo, [][]byte{[]byte("a"), []byte("b"), []byte("c")}, nil)
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.ListRegionIDsInKeyRange(s.bo, []byte("a"), []byte("e"))
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.LoadRegionsInKeyRange(s.bo, []byte("a"), []byte("e"))
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.BatchLoadRegionsWithKeyRange(s.bo, []byte("a"), []byte("e"), 10)
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.BatchLoadRegionsWithKeyRanges(s.bo, []router.KeyRange{{StartKey: []byte("a"), EndKey: []byte("e")}}, 10)
+			s.Nil(err)
+		},
+		func() {
+			_, err := s.cache.BatchLoadRegionsFromKey(s.bo, []byte("a"), 10)
+			s.Nil(err)
+		},
+	}
+
+	// Whether the region is loaded from PD(bypass the region cache) or from the region cache,
+	// the existing valid region should not be invalidated.
+	for _, fn := range fns {
+		loc, err := s.cache.LocateKey(s.bo, []byte("b"))
+		s.Nil(err)
+		region := s.cache.GetCachedRegionWithRLock(loc.Region)
+		fn()
+		s.True(region.isValid())
+	}
+
+	// If the region is invalidated already, it should be reloaded from PD and inserted into region cache anyway.
+	for _, fn := range fns {
+		loc, err := s.cache.LocateKey(s.bo, []byte("b"))
+		s.Nil(err)
+		region := s.cache.GetCachedRegionWithRLock(loc.Region)
+		region.invalidate(Other)
+		s.False(region.isValid())
+		fn()
+		s.False(region.isValid())
+		newLoc := s.cache.TryLocateKey([]byte("b"))
+		s.NotNil(newLoc)
+		region = s.cache.GetCachedRegionWithRLock(newLoc.Region)
+		s.True(region.isValid())
+	}
+}
+
+func (s *testRegionCacheSuite) TestBatchLoadLimitRanges() {
+	ranges := make([]kv.KeyRange, 0, 100000)
+	for i := 0; i < 100000; i++ {
+		startKey := make([]byte, 8)
+		endKey := make([]byte, 8)
+		binary.BigEndian.PutUint64(startKey, uint64(i*2))
+		binary.BigEndian.PutUint64(endKey, uint64(i*2+1))
+		ranges = append(ranges, kv.KeyRange{StartKey: startKey, EndKey: endKey})
+	}
+
+	originalBatchScanRegions := s.cache.pdClient.BatchScanRegions
+	s.cache.pdClient = &inspectedPDClient{
+		Client: s.cache.pdClient,
+		batchScanRegions: func(ctx context.Context, keyRanges []router.KeyRange, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
+			s.LessOrEqual(len(keyRanges), 16*defaultRegionsPerBatch)
+			return originalBatchScanRegions(ctx, keyRanges, limit, opts...)
+		},
+	}
+	_, err := s.cache.BatchLocateKeyRanges(s.bo, ranges)
+	s.Nil(err)
+}

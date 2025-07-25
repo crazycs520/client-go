@@ -35,9 +35,11 @@
 package error
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pkg/errors"
@@ -250,6 +252,8 @@ func (e *ErrPDServerTimeout) Error() string {
 }
 
 // ErrGCTooEarly is the error that GC life time is shorter than transaction duration
+// For compatibility concerns of exported interfaces, keep the old error type.
+// Deprecated: use ErrTxnAbortedByGC instead.
 type ErrGCTooEarly struct {
 	TxnStartTS  time.Time
 	GCSafePoint time.Time
@@ -257,6 +261,23 @@ type ErrGCTooEarly struct {
 
 func (e *ErrGCTooEarly) Error() string {
 	return fmt.Sprintf("GC life time is shorter than transaction duration, transaction starts at %v, GC safe point is %v", e.TxnStartTS, e.GCSafePoint)
+}
+
+// ErrTxnAbortedByGC is the error that GC progress has advanced to a state in which the txn is no longer safe to
+// continue.
+type ErrTxnAbortedByGC struct {
+	TxnStartTS       uint64
+	TxnStartTSTime   time.Time
+	TxnSafePoint     uint64
+	TxnSafePointTime time.Time
+}
+
+func (e *ErrTxnAbortedByGC) Error() string {
+	// In most cases, the error is caused by the transaction runs too long, instead of improper GC life time
+	// configuration. This means the description of this error is not accurate.
+	// However, as this error message is already widely acknowledged and might have become part of our diagnosing
+	// process, we keep the error message unchanged.
+	return fmt.Sprintf("GC life time is shorter than transaction duration, transaction start ts is %v (%v), txn safe point is %v (%v)", e.TxnStartTS, e.TxnStartTSTime, e.TxnSafePoint, e.TxnSafePointTime)
 }
 
 // ErrTokenLimit is the error that token is up to the limit.
@@ -353,4 +374,48 @@ func Log(err error) {
 	if err != nil {
 		logutil.BgLogger().Error("encountered error", zap.Error(err), zap.Stack("stack"))
 	}
+}
+
+// ExtractDebugInfoStrFromKeyErr extracts the debug info from key error
+func ExtractDebugInfoStrFromKeyErr(keyErr *kvrpcpb.KeyError) string {
+	if keyErr.DebugInfo == nil {
+		return ""
+	}
+
+	debugInfoToMarshal := keyErr.DebugInfo
+	if redact.NeedRedact() {
+		redactMarker := []byte{'?'}
+		debugInfoToMarshal = proto.Clone(debugInfoToMarshal).(*kvrpcpb.DebugInfo)
+		for _, mvccInfo := range debugInfoToMarshal.MvccInfo {
+			mvccInfo.Key = redactMarker
+			if mvcc := mvccInfo.Mvcc; mvcc != nil {
+				if lock := mvcc.Lock; lock != nil {
+					lock.Primary = redactMarker
+					lock.ShortValue = redactMarker
+					for i := range lock.Secondaries {
+						lock.Secondaries[i] = redactMarker
+					}
+				}
+
+				for _, write := range mvcc.Writes {
+					if write != nil {
+						write.ShortValue = redactMarker
+					}
+				}
+
+				for _, value := range mvcc.Values {
+					if value != nil {
+						value.Value = redactMarker
+					}
+				}
+			}
+		}
+	}
+
+	debugStr, err := json.Marshal(debugInfoToMarshal)
+	if err != nil {
+		log.Error("encountered error when extracting debug info for keyError", zap.Error(err), zap.Stack("stack"))
+		return ""
+	}
+	return string(debugStr)
 }
