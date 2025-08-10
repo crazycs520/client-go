@@ -414,7 +414,7 @@ func ExtractDebugInfoStrFromKeyErr(keyErr *kvrpcpb.KeyError) string {
 
 	debugStr, err := json.Marshal(debugInfoToMarshal)
 	if err != nil {
-		log.Error("encountered error when extracting debug info for keyError", zap.Error(err), zap.Stack("stack"))
+		logutil.BgLogger().Error("encountered error when extracting debug info for keyError", zap.Error(err), zap.Stack("stack"))
 		return ""
 	}
 	return string(debugStr)
