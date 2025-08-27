@@ -81,6 +81,8 @@ type TiKVClient struct {
 	GrpcInitialWindowSize int32 `toml:"grpc-initial-window-size" json:"grpc-initial-window-size"`
 	// GrpcInitialConnWindowSize is the value for initial window size on a connection.
 	GrpcInitialConnWindowSize int32 `toml:"grpc-initial-conn-window-size" json:"grpc-initial-conn-window-size"`
+	// Gateway is the address of the gateway server (e.g., "localhost:1080"). If empty, no gateway will be used for TiKV connections.
+	Gateway string `toml:"gateway" json:"gateway"`
 	// CommitTimeout is the max time which command 'commit' will wait.
 	CommitTimeout string      `toml:"commit-timeout" json:"commit-timeout"`
 	AsyncCommit   AsyncCommit `toml:"async-commit" json:"async-commit"`
@@ -159,6 +161,7 @@ func DefaultTiKVClient() TiKVClient {
 		GrpcSharedBufferPool:      false,
 		GrpcInitialWindowSize:     DefGrpcInitialWindowSize,
 		GrpcInitialConnWindowSize: DefGrpcInitialConnWindowSize,
+		Gateway:                   "",
 		CommitTimeout:             "41s",
 		AsyncCommit: AsyncCommit{
 			// FIXME: Find an appropriate default limit.

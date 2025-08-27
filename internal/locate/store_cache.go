@@ -17,6 +17,7 @@ package locate
 import (
 	"context"
 	"fmt"
+	tigateway "git.pingcap.net/pingkai/tigateway/client"
 	"math"
 	"strconv"
 	"strings"
@@ -775,6 +776,7 @@ func createKVHealthClient(ctx context.Context, addr string) (*grpc.ClientConn, h
 		opt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 	keepAlive := cfg.TiKVClient.GrpcKeepAliveTime
+
 	conn, err := grpc.DialContext(
 		ctx,
 		addr,
@@ -794,6 +796,7 @@ func createKVHealthClient(ctx context.Context, addr string) (*grpc.ClientConn, h
 			Time:    time.Duration(keepAlive) * time.Second,
 			Timeout: cfg.TiKVClient.GetGrpcKeepAliveTimeout(),
 		}),
+		tigateway.WithTiGateway(cfg.TiKVClient.Gateway),
 	)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)

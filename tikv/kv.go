@@ -38,6 +38,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	tigateway "git.pingcap.net/pingkai/tigateway/client"
 	"math"
 	"math/rand"
 	"strconv"
@@ -98,6 +99,7 @@ func createEtcdKV(addrs []string, tlsConfig *tls.Config) (*clientv3.Client, erro
 			TLS:                  tlsConfig,
 			DialKeepAliveTime:    time.Second * time.Duration(cfg.TiKVClient.GrpcKeepAliveTime),
 			DialKeepAliveTimeout: cfg.TiKVClient.GetGrpcKeepAliveTimeout(),
+			DialOptions:          []grpc.DialOption{tigateway.WithTiGateway(cfg.TiKVClient.Gateway)},
 		},
 	)
 	if err != nil {
