@@ -130,9 +130,15 @@ func (b *Backoffer) BackoffWithMaxSleepTxnLockFast(maxSleepMs int, err error) er
 	return b.BackoffWithCfgAndMaxSleep(cfg, maxSleepMs, err)
 }
 
+var StandbyMode atomic.Bool
+
 // BackoffWithCfgAndMaxSleep sleeps a while base on the Config and records the error message
 // and never sleep more than maxSleepMs for each sleep.
 func (b *Backoffer) BackoffWithCfgAndMaxSleep(cfg *Config, maxSleepMs int, err error) error {
+	if StandbyMode.Load() {
+		return errors.New("cluster is in standby mode")
+	}
+
 	if strings.Contains(err.Error(), tikverr.MismatchClusterID) {
 		logutil.Logger(b.ctx).Fatal("critical error", zap.Error(err))
 	}
