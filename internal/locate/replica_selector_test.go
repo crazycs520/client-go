@@ -2645,6 +2645,42 @@ func TestReplicaReadAccessPathByLearnerCase(t *testing.T) {
 	s.True(s.runCaseAndCompare(ca))
 }
 
+func TestReplicaReadAccessPathByLearnerCase2(t *testing.T) {
+	s := new(testReplicaSelectorSuite)
+	s.SetupTest(t)
+	defer s.TearDownTest()
+
+	// Add a Replicator learner peer to the region.
+	rc := s.getRegion()
+	storeID := uint64(4)
+	s.cluster.AddStore(storeID, fmt.Sprintf("store%d", storeID), &metapb.StoreLabel{
+		Key:   "engine",
+		Value: "replicator",
+	})
+	s.cluster.AddLearner(rc.meta.Id, storeID, s.cluster.AllocID())
+	rc.invalidate(Other)                                                         // invalid region cache to reload region.
+	fakeEpochNotMatch := &errorpb.Error{EpochNotMatch: &errorpb.EpochNotMatch{}} // fake region error, cause by no replica is available.
+
+	ca := replicaSelectorAccessPathCase{
+		reqType:   tikvrpc.CmdGet,
+		readType:  kv.ReplicaReadLearner,
+		accessErr: []RegionErrorType{ServerIsBusyErr, ServerIsBusyErr, ServerIsBusyErr},
+		expect: &accessPathResult{
+			accessPath: []string{
+				"{addr: store1, replica-read: false, stale-read: false}",
+				"{addr: store2, replica-read: true, stale-read: false}",
+				"{addr: store3, replica-read: true, stale-read: false}",
+			},
+			respErr:         "",
+			respRegionError: fakeEpochNotMatch,
+			backoffCnt:      1,
+			backoffDetail:   []string{"tikvServerBusy+1"},
+			regionIsValid:   false,
+		},
+	}
+	s.True(s.runCaseAndCompare(ca))
+}
+
 func TestReplicaReadAvoidSlowStore(t *testing.T) {
 	s := new(testReplicaSelectorSuite)
 	s.SetupTest(t)

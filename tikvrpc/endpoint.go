@@ -45,6 +45,7 @@ const (
 	TiFlash
 	TiDB
 	TiFlashCompute
+	Replicator
 )
 
 // Name returns the name of endpoint type.
@@ -75,16 +76,21 @@ const (
 	EngineLabelTiFlashCompute = "tiflash_compute"
 	EngineRoleLabelKey        = "engine_role"
 	EngineRoleWrite           = "write"
+	EngineRoleReplicator      = "replicator"
 )
 
 // GetStoreTypeByMeta gets store type by store meta pb.
 func GetStoreTypeByMeta(store *metapb.Store) EndpointType {
 	for _, label := range store.Labels {
-		if label.Key == EngineLabelKey && label.Value == EngineLabelTiFlash {
-			return TiFlash
-		}
-		if label.Key == EngineLabelKey && label.Value == EngineLabelTiFlashCompute {
-			return TiFlashCompute
+		if label.Key == EngineLabelKey {
+			switch label.Value {
+			case EngineLabelTiFlash:
+				return TiFlash
+			case EngineLabelTiFlashCompute:
+				return TiFlashCompute
+			case EngineRoleReplicator:
+				return Replicator
+			}
 		}
 	}
 	return TiKV
